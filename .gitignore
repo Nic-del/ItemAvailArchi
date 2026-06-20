@@ -1,0 +1,37 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging / build outputs
+build/
+dist/
+*.zip
+*.spec
+
+# Local config & logs
+*.log
+crash.txt
+debug_import.py
+
+# OBS Text Overlay Outputs
+obs_accessible.txt
+obs_checks.txt
+obs_slot.txt
+obs_stats.txt
+remaining_locations.txt
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE files
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
