@@ -178,8 +178,9 @@ root_logger.addHandler(console_handler)
 
 # Completely restore warnings and standard streams to defaults to bypass Kivy overrides
 warnings.showwarning = original_showwarning
-sys.stdout = original_stdout if original_stdout is not None else sys.stdout
-sys.stderr = original_stderr if original_stderr is not None else sys.stderr
+if "--silent" not in sys.argv:
+    sys.stdout = original_stdout if original_stdout is not None else sys.stdout
+    sys.stderr = original_stderr if original_stderr is not None else sys.stderr
 
 
 
@@ -456,6 +457,50 @@ async def main():
         game_name = game_resolved
 
     has_args = bool(server_resolved or slot_resolved)
+
+    # If another instance of the tracker is already running on the control port,
+    # send a TCP command to it to connect to the new server/slot/password/game and then exit.
+    if has_args:
+        control_port = 38283
+        try:
+            port_idx = sys.argv.index("--control-port")
+            control_port = int(sys.argv[port_idx + 1])
+        except (ValueError, IndexError):
+            pass
+
+        for port in range(control_port, control_port + 5):
+            try:
+                reader, writer = await asyncio.open_connection('127.0.0.1', port)
+                server_to_send = server
+                if "archipelago.gg" in server_to_send and not server_to_send.startswith(("ws://", "wss://")):
+                    server_to_send = f"wss://{server_to_send}"
+                elif ":" not in server_to_send and not server_to_send.startswith(("ws://", "wss://")):
+                    server_to_send = f"localhost:{server_to_send}"
+
+                game_to_send = game_name
+                if not game_to_send:
+                    res = get_game_from_yaml(os.path.join(ap_dir, "Players"), slot_name)
+                    if res:
+                        game_to_send = res[0]
+
+                payload = {
+                    "action": "connect",
+                    "server": server_to_send,
+                    "slot": slot_name,
+                    "password": password,
+                    "game": game_to_send
+                }
+                writer.write(json.dumps(payload).encode() + b"\n")
+                await writer.drain()
+                resp = await reader.readline()
+                writer.close()
+                await writer.wait_closed()
+                if resp.strip() == b"OK":
+                    if not SILENT_MODE:
+                        print(f"Sent connection command to running instance on port {port} (Server: {server_to_send}, Slot: {slot_name}, Game: {game_to_send}). Exiting.")
+                    return
+            except Exception:
+                pass
 
     if not GUI_MODE and not SILENT_MODE and not has_args:
         print("=== Archipelago CLI Universal Tracker ===")

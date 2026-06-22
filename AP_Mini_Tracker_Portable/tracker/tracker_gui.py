@@ -164,20 +164,37 @@ class App:
             self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
         self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
  
-        # Pre-start idle subprocess to make initial connection instant
-        self.start_idle_subprocess()
-
         # Start queue polling
         self.root.after(100, self.poll_queue)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         if auto_connect:
-            self.root.after(500, self.start_tracking)
+            # Set initial UI states for connecting
+            self.tracking_active = True
+            self.connect_btn.configure(text="Connecting...", state="disabled")
+            self.lbl_slot_game.configure(text="Initializing...")
+            self.lbl_checks.configure(text="Please wait...")
+            self.lbl_accessible.configure(text="Accessible (In Logic): --")
+            self.start_tracker_subprocess(server=server_arg, slot=slot_arg, password=self.password_arg)
+        else:
+            # Pre-start idle subprocess to make initial connection instant
+            self.start_tracker_subprocess()
 
-    def start_idle_subprocess(self):
+    def start_tracker_subprocess(self, server=None, slot=None, password=None):
         python_exe = sys.executable or "python"
-        script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tracker_cli.py")
-        cmd = [python_exe, script_path, "--gui", "--idle"]
+        if getattr(sys, 'frozen', False):
+            # When frozen, spawn the executable itself with CLI arguments
+            cmd = [python_exe, "--gui"]
+        else:
+            script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tracker_cli.py")
+            cmd = [python_exe, script_path, "--gui"]
+
+        if server and slot:
+            cmd.extend(["--server", server, "--slot", slot])
+            if password:
+                cmd.extend(["--password", password])
+        else:
+            cmd.append("--idle")
         
         try:
             startupinfo = None
@@ -198,7 +215,7 @@ class App:
             t = threading.Thread(target=self.read_subprocess_stdout, daemon=True)
             t.start()
         except Exception as e:
-            gui_queue.put(("ERROR", f"Failed to pre-start tracker: {e}"))
+            gui_queue.put(("ERROR", f"Failed to start tracker subprocess: {e}"))
 
     def read_subprocess_stdout(self):
         try:
@@ -261,7 +278,7 @@ class App:
         }
         try:
             if not self.proc or self.proc.poll() is not None:
-                self.start_idle_subprocess()
+                self.start_tracker_subprocess()
             self.proc.stdin.write(json.dumps(cmd_data) + "\n")
             self.proc.stdin.flush()
         except Exception as e:
