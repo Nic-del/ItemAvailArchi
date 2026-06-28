@@ -895,12 +895,12 @@ async def main():
         if task and not task.done():
             try:
                 await asyncio.wait_for(ctx.disconnect(allow_autoreconnect=False), timeout=1.0)
-            except Exception:
+            except BaseException:
                 pass
             task.cancel()
             try:
                 await asyncio.wait_for(task, timeout=1.0)
-            except Exception:
+            except BaseException:
                 pass
         ctx.items_received = []
         ctx.locations_checked = set()
@@ -939,12 +939,12 @@ async def main():
         if task and not task.done():
             try:
                 await asyncio.wait_for(ctx.disconnect(allow_autoreconnect=False), timeout=1.0)
-            except Exception:
+            except BaseException:
                 pass
             task.cancel()
             try:
                 await asyncio.wait_for(task, timeout=1.0)
-            except Exception:
+            except BaseException:
                 pass
 
         # Parse game if not set yet (we might need to search the YAML files)
