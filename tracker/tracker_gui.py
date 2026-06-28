@@ -20,6 +20,13 @@ from tkinter import ttk, messagebox
 # --- GUI THREAD COMMUNICATIONS ---
 gui_queue = queue.Queue()
 
+def get_settings_path():
+    if getattr(sys, 'frozen', False):
+        base_dir = os.path.dirname(sys.executable)
+    else:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_dir, "tracker_settings.json")
+
 class App:
     def __init__(self, root):
         self.root = root
@@ -100,10 +107,22 @@ class App:
             auto_connect = True
 
         # Apply defaults if still unresolved
+        saved_server = None
+        saved_slot = None
+        try:
+            settings_path = get_settings_path()
+            if os.path.exists(settings_path):
+                with open(settings_path, "r", encoding="utf-8") as f:
+                    settings = json.load(f)
+                    saved_server = settings.get("server")
+                    saved_slot = settings.get("slot")
+        except Exception:
+            pass
+
         if not server_arg:
-            server_arg = "localhost:38281"
+            server_arg = saved_server or "localhost:38281"
         if not slot_arg:
-            slot_arg = "LADXBeta"
+            slot_arg = saved_slot or "LADXBeta"
 
         # State vars
         self.tracking_active = False
@@ -364,6 +383,18 @@ class App:
         self.root.after(100, self.poll_queue)
 
     def on_close(self):
+        # Save last server and slot name
+        try:
+            settings_path = get_settings_path()
+            settings = {
+                "server": self.server_entry.get().strip(),
+                "slot": self.slot_entry.get().strip()
+            }
+            with open(settings_path, "w", encoding="utf-8") as f:
+                json.dump(settings, f, indent=4)
+        except Exception as e:
+            print(f"[Tracker GUI] Failed to save settings: {e}", flush=True)
+
         if self.proc and self.proc.poll() is None:
             try:
                 self.proc.stdin.write(json.dumps({"action": "exit"}) + "\n")

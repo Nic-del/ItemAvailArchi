@@ -130,6 +130,26 @@ from tracker.TrackerClient import TrackerGameContext, server_loop
 from worlds.AutoWorld import AutoWorldRegister
 from tracker import TrackerWorld
 
+def find_matching_game(name, keys):
+    if not name:
+        return None
+    name_lower = name.lower().replace("'", "").strip()
+    if name in keys:
+        return name
+    # Try case-insensitive and apostrophe-insensitive exact match
+    for k in keys:
+        k_lower = k.lower().replace("'", "").strip()
+        if k_lower == name_lower:
+            return k
+    # Try matching without " beta" suffix
+    name_no_beta = name_lower.replace(" beta", "").strip()
+    for k in keys:
+        k_lower = k.lower().replace("'", "").strip()
+        k_no_beta = k_lower.replace(" beta", "").strip()
+        if k_no_beta == name_no_beta:
+            return k
+    return None
+
 class SettingsDict(dict):
     def __getattr__(self, name):
         try:
@@ -161,6 +181,7 @@ class CLITrackerContext(TrackerGameContext):
     def __init__(self, server_address, password, slot_name):
         super().__init__(server_address, password, no_connection=False, print_list=False, print_count=False)
         self.auth = slot_name
+        self.username = slot_name
         self.selected_slot_name = slot_name
         self.temp_dir_obj = None
         self.reconnecting = False
@@ -475,7 +496,8 @@ async def main():
         ctx.temp_dir_obj = temp_dir_obj
 
         # 3. Check game world is installed
-        connected_cls = AutoWorldRegister.world_types.get(game_name)
+        matched_game_key = find_matching_game(game_name, AutoWorldRegister.world_types.keys())
+        connected_cls = AutoWorldRegister.world_types.get(matched_game_key) if matched_game_key else None
         if connected_cls is None:
             if GUI_MODE:
                 print(json.dumps({"event": "error", "message": f"Game '{game_name}' is not installed in the active environment."}), flush=True)
@@ -600,6 +622,7 @@ async def main():
 
             ctx.server_address = r_server
             ctx.auth = r_slot
+            ctx.username = r_slot
             ctx.selected_slot_name = r_slot
             ctx.password = r_password
             ctx.game = r_game
@@ -619,6 +642,7 @@ async def main():
         if reuse_multiworld:
             ctx.server_address = r_server
             ctx.auth = r_slot
+            ctx.username = r_slot
             ctx.selected_slot_name = r_slot
             ctx.password = r_password
             ctx.game = r_game
@@ -688,13 +712,15 @@ async def main():
 
         ctx.server_address = r_server
         ctx.auth = r_slot
+        ctx.username = r_slot
         ctx.selected_slot_name = r_slot
         ctx.password = r_password
         ctx.game = r_game
         ctx.temp_dir_obj = temp_dir_obj
 
         # 3. Check game world is installed
-        connected_cls = AutoWorldRegister.world_types.get(r_game)
+        matched_game_key = find_matching_game(r_game, AutoWorldRegister.world_types.keys())
+        connected_cls = AutoWorldRegister.world_types.get(matched_game_key) if matched_game_key else None
         if connected_cls is None:
             if GUI_MODE:
                 print(json.dumps({"event": "error", "message": f"Game '{r_game}' is not installed in the active environment."}), flush=True)

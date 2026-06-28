@@ -177,6 +177,8 @@ def scan_available_worlds():
     local_worlds_dir = None
     if os.path.exists(ap_source_dir):
         local_worlds_dir = os.path.join(ap_source_dir, "worlds")
+    elif os.path.exists(os.path.join(ap_dir, "lib", "worlds")):
+        local_worlds_dir = os.path.join(ap_dir, "lib", "worlds")
     elif os.path.exists(os.path.join(ap_dir, "worlds")):
         local_worlds_dir = os.path.join(ap_dir, "worlds")
         
@@ -198,14 +200,16 @@ def scan_available_worlds():
                         try:
                             with open(init_path, "r", encoding="utf-8-sig") as f:
                                 chunk = f.read()
-                            match = re.search(r'\bgame\s*(?::\s*\w+)?\s*=\s*[\'"]([^\'"]+)[\'"]', chunk)
+                            match = re.search(r'\bgame\s*(?::\s*\w+)?\s*=\s*(?:"([^"]+)"|\'([^\']+)\')', chunk)
                             if match:
-                                game_to_world_file[match.group(1).lower()] = (entry.name, False)
+                                game = match.group(1) or match.group(2)
+                                game_to_world_file[game.lower()] = (entry.name, False)
                         except Exception:
                             pass
                 elif entry.is_file() and entry.name.endswith(".apworld"):
                     try:
                         with zipfile.ZipFile(entry.path, "r") as z:
+                            found = False
                             for name in z.namelist():
                                 if name.endswith("archipelago.json"):
                                     with z.open(name) as f:
@@ -213,7 +217,18 @@ def scan_available_worlds():
                                         game = manifest.get("game")
                                         if game:
                                             game_to_world_file[game.lower()] = (entry.name, True)
+                                            found = True
                                     break
+                            if not found:
+                                for name in z.namelist():
+                                    if name.endswith("__init__.py") and name.count('/') <= 1:
+                                        with z.open(name) as f:
+                                            chunk = f.read().decode("utf-8", errors="ignore")
+                                        match = re.search(r'\bgame\s*(?::\s*\w+)?\s*=\s*(?:"([^"]+)"|\'([^\']+)\')', chunk)
+                                        if match:
+                                            game = match.group(1) or match.group(2)
+                                            game_to_world_file[game.lower()] = (entry.name, True)
+                                        break
                     except Exception:
                         pass
         except Exception:
@@ -222,21 +237,43 @@ def scan_available_worlds():
     game_to_world_file["generic"] = ("generic", False)
     return game_to_world_file
 
+def find_matching_game(name, keys):
+    if not name:
+        return None
+    name_lower = name.lower().replace("'", "").strip()
+    if name in keys:
+        return name
+    # Try case-insensitive and apostrophe-insensitive exact match
+    for k in keys:
+        k_lower = k.lower().replace("'", "").strip()
+        if k_lower == name_lower:
+            return k
+    # Try matching without " beta" suffix
+    name_no_beta = name_lower.replace(" beta", "").strip()
+    for k in keys:
+        k_lower = k.lower().replace("'", "").strip()
+        k_no_beta = k_lower.replace(" beta", "").strip()
+        if k_no_beta == name_no_beta:
+            return k
+    return None
+
 def ensure_world_loaded(game_name):
     if not game_name:
         return True
     
     # We must first ensure worlds is imported
     from worlds.AutoWorld import AutoWorldRegister
-    if game_name in AutoWorldRegister.world_types:
+    
+    matched_registered = find_matching_game(game_name, AutoWorldRegister.world_types.keys())
+    if matched_registered:
         return True
 
     mapping = scan_available_worlds()
-    game_lower = game_name.lower()
-    if game_lower not in mapping:
+    matched_game = find_matching_game(game_name, mapping.keys())
+    if not matched_game:
         return False
 
-    entry_name, is_zip = mapping[game_lower]
+    entry_name, is_zip = mapping[matched_game]
     allowed_entries.add(entry_name)
     allowed_entries.add(entry_name.lower())
 
@@ -255,6 +292,8 @@ def ensure_world_loaded(game_name):
                 local_worlds_dir = None
                 if os.path.exists(ap_source_dir):
                     local_worlds_dir = os.path.join(ap_source_dir, "worlds")
+                elif os.path.exists(os.path.join(ap_dir, "lib", "worlds")):
+                    local_worlds_dir = os.path.join(ap_dir, "lib", "worlds")
                 elif os.path.exists(os.path.join(ap_dir, "worlds")):
                     local_worlds_dir = os.path.join(ap_dir, "worlds")
                 if local_worlds_dir:
@@ -411,6 +450,7 @@ def initialize_dynamic_imports(game_name=None):
         def __init__(self, server_address, password, slot_name):
             super().__init__(server_address, password, no_connection=False, print_list=False, print_count=False)
             self.auth = slot_name
+            self.username = slot_name
             self.selected_slot_name = slot_name
             self.temp_dir_obj = None
             self.reconnecting = False
@@ -816,7 +856,8 @@ async def main():
         ctx.temp_dir_obj = temp_dir_obj
 
         # 3. Check game world is installed
-        connected_cls = AutoWorldRegister.world_types.get(game_name)
+        matched_game_key = find_matching_game(game_name, AutoWorldRegister.world_types.keys())
+        connected_cls = AutoWorldRegister.world_types.get(matched_game_key) if matched_game_key else None
         if connected_cls is None:
             from worlds import failed_world_loads
             error_msg = f"Game '{game_name}' is not installed in the active environment."
@@ -985,6 +1026,7 @@ async def main():
 
             ctx.server_address = r_server
             ctx.auth = r_slot
+            ctx.username = r_slot
             ctx.selected_slot_name = r_slot
             ctx.password = r_password
             ctx.game = r_game
@@ -1004,6 +1046,7 @@ async def main():
         if reuse_multiworld:
             ctx.server_address = r_server
             ctx.auth = r_slot
+            ctx.username = r_slot
             ctx.selected_slot_name = r_slot
             ctx.password = r_password
             ctx.game = r_game
@@ -1075,13 +1118,15 @@ async def main():
 
         ctx.server_address = r_server
         ctx.auth = r_slot
+        ctx.username = r_slot
         ctx.selected_slot_name = r_slot
         ctx.password = r_password
         ctx.game = r_game
         ctx.temp_dir_obj = temp_dir_obj
 
         # 3. Check game world is installed
-        connected_cls = AutoWorldRegister.world_types.get(r_game)
+        matched_game_key = find_matching_game(r_game, AutoWorldRegister.world_types.keys())
+        connected_cls = AutoWorldRegister.world_types.get(matched_game_key) if matched_game_key else None
         if connected_cls is None:
             from worlds import failed_world_loads
             error_msg = f"Game '{r_game}' is not installed in the active environment."
