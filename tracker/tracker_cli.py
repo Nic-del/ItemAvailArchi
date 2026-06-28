@@ -110,35 +110,7 @@ def patched_user_path(*args):
     return os.path.join(ap_dir, *args)
 Utils.user_path = patched_user_path
 
-# Patch os.scandir to hide tracker.apworld to avoid duplicate "Universal Tracker" registration
-orig_scandir = os.scandir
-class PatchedScandirIterator:
-    def __init__(self, orig_iterator):
-        self.orig_iterator = orig_iterator
-    def __iter__(self):
-        return self
-    def __next__(self):
-        while True:
-            entry = next(self.orig_iterator)
-            if entry.name == "tracker.apworld":
-                continue
-            return entry
-    def __enter__(self):
-        if hasattr(self.orig_iterator, "__enter__"):
-            self.orig_iterator.__enter__()
-        return self
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if hasattr(self.orig_iterator, "__exit__"):
-            return self.orig_iterator.__exit__(exc_type, exc_val, exc_tb)
 
-def patched_scandir(path="."):
-    if not os.path.exists(path):
-        try:
-            os.makedirs(path, exist_ok=True)
-        except Exception:
-            pass
-    return PatchedScandirIterator(orig_scandir(path))
-os.scandir = patched_scandir
 
 # Save original showwarning before Kivy overrides it
 import warnings
@@ -184,9 +156,174 @@ if "--silent" not in sys.argv:
 
 
 
-from tracker.TrackerClient import TrackerGameContext, server_loop
-from worlds.AutoWorld import AutoWorldRegister
-from tracker import TrackerWorld
+# Fast scanning & selective loading structures
+import re
+import zipfile
+import json
+import importlib
+import importlib.util
+
+game_to_world_file = {}
+active_game_name = None
+allowed_entries = {"generic"}
+
+def scan_available_worlds():
+    global game_to_world_file
+    if game_to_world_file:
+        return game_to_world_file
+
+    paths_to_scan = []
+    
+    local_worlds_dir = None
+    if os.path.exists(ap_source_dir):
+        local_worlds_dir = os.path.join(ap_source_dir, "worlds")
+    elif os.path.exists(os.path.join(ap_dir, "worlds")):
+        local_worlds_dir = os.path.join(ap_dir, "worlds")
+        
+    if local_worlds_dir and os.path.exists(local_worlds_dir):
+        paths_to_scan.append((local_worlds_dir, True))
+        
+    custom_worlds_dir = os.path.join(ap_dir, "custom_worlds")
+    if os.path.exists(custom_worlds_dir):
+        paths_to_scan.append((custom_worlds_dir, False))
+
+    for folder, is_relative in paths_to_scan:
+        try:
+            for entry in orig_scandir(folder):
+                if entry.name.startswith(("_", ".")):
+                    continue
+                if entry.is_dir():
+                    init_path = os.path.join(entry.path, "__init__.py")
+                    if os.path.exists(init_path):
+                        try:
+                            with open(init_path, "r", encoding="utf-8-sig") as f:
+                                chunk = f.read()
+                            match = re.search(r'\bgame\s*(?::\s*\w+)?\s*=\s*[\'"]([^\'"]+)[\'"]', chunk)
+                            if match:
+                                game_to_world_file[match.group(1).lower()] = (entry.name, False)
+                        except Exception:
+                            pass
+                elif entry.is_file() and entry.name.endswith(".apworld"):
+                    try:
+                        with zipfile.ZipFile(entry.path, "r") as z:
+                            for name in z.namelist():
+                                if name.endswith("archipelago.json"):
+                                    with z.open(name) as f:
+                                        manifest = json.loads(f.read().decode("utf-8"))
+                                        game = manifest.get("game")
+                                        if game:
+                                            game_to_world_file[game.lower()] = (entry.name, True)
+                                    break
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    game_to_world_file["generic"] = ("generic", False)
+    return game_to_world_file
+
+def ensure_world_loaded(game_name):
+    if not game_name:
+        return True
+    
+    # We must first ensure worlds is imported
+    from worlds.AutoWorld import AutoWorldRegister
+    if game_name in AutoWorldRegister.world_types:
+        return True
+
+    mapping = scan_available_worlds()
+    game_lower = game_name.lower()
+    if game_lower not in mapping:
+        return False
+
+    entry_name, is_zip = mapping[game_lower]
+    allowed_entries.add(entry_name)
+    allowed_entries.add(entry_name.lower())
+
+    if not is_zip:
+        try:
+            importlib.import_module(f"worlds.{entry_name}")
+            return True
+        except Exception as e:
+            sys.stderr.write(f"Failed to dynamically import worlds.{entry_name}: {e}\n")
+            return False
+    else:
+        try:
+            custom_worlds_dir = os.path.join(ap_dir, "custom_worlds")
+            apworld_path = os.path.join(custom_worlds_dir, entry_name)
+            if not os.path.exists(apworld_path):
+                local_worlds_dir = None
+                if os.path.exists(ap_source_dir):
+                    local_worlds_dir = os.path.join(ap_source_dir, "worlds")
+                elif os.path.exists(os.path.join(ap_dir, "worlds")):
+                    local_worlds_dir = os.path.join(ap_dir, "worlds")
+                if local_worlds_dir:
+                    apworld_path = os.path.join(local_worlds_dir, entry_name)
+            
+            import zipimport
+            from pathlib import Path
+            importer = zipimport.zipimporter(apworld_path)
+            world_name = Path(entry_name).stem
+            
+            spec = importer.find_spec(f"worlds.{world_name}")
+            if spec:
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[f"worlds.{world_name}"] = module
+                spec.loader.exec_module(module)
+                return True
+        except Exception as e:
+            sys.stderr.write(f"Failed to dynamically load apworld {entry_name}: {e}\n")
+            return False
+    return False
+
+# Patch os.scandir to selectively filter and hide tracker.apworld
+orig_scandir = os.scandir
+class PatchedScandirIterator:
+    def __init__(self, orig_iterator, path):
+        self.orig_iterator = orig_iterator
+        self.is_worlds_dir = False
+        path_norm = os.path.normpath(path).lower()
+        if "worlds" in path_norm or "custom_worlds" in path_norm:
+            self.is_worlds_dir = True
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        while True:
+            entry = next(self.orig_iterator)
+            if entry.name == "tracker.apworld":
+                continue
+            if self.is_worlds_dir and active_game_name is not None:
+                # Filter out other game worlds to speed up loading
+                name_lower = entry.name.lower()
+                if entry.name not in allowed_entries and name_lower not in allowed_entries:
+                    is_world = False
+                    if entry.is_dir() and os.path.exists(os.path.join(entry.path, "__init__.py")):
+                        is_world = True
+                    elif entry.is_file() and entry.name.endswith(".apworld"):
+                        is_world = True
+                    if is_world:
+                        continue
+            return entry
+
+    def __enter__(self):
+        if hasattr(self.orig_iterator, "__enter__"):
+            self.orig_iterator.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if hasattr(self.orig_iterator, "__exit__"):
+            return self.orig_iterator.__exit__(exc_type, exc_val, exc_tb)
+
+def patched_scandir(path="."):
+    if not os.path.exists(path):
+        try:
+            os.makedirs(path, exist_ok=True)
+        except Exception:
+            pass
+    return PatchedScandirIterator(orig_scandir(path), path)
+os.scandir = patched_scandir
 
 class SettingsDict(dict):
     def __getattr__(self, name):
@@ -197,20 +334,6 @@ class SettingsDict(dict):
     def __setattr__(self, name, value):
         self[name] = value
 
-# Initialize settings with defaults
-TrackerWorld._AutoWorldRegister__settings = SettingsDict({
-    "sorting_method": "apworld",
-    "include_location_name": True,
-    "include_region_name": False,
-    "hide_excluded_locations": False,
-    "use_split_map_icons": True,
-    "enforce_deferred_entrances": "default",
-    "display_glitched_logic": True,
-    "save_entered_commands": True,
-    "sorting_priorities": {},
-    "player_files_path": os.path.join(ap_dir, "Players")
-})
-
 logger = logging.getLogger("TrackerCLI")
 
 GUI_MODE = "--gui" in sys.argv
@@ -219,146 +342,217 @@ SILENT_MODE = "--silent" in sys.argv
 if SILENT_MODE:
     logging.getLogger().setLevel(logging.WARNING)
 
-class CLITrackerContext(TrackerGameContext):
-    def __init__(self, server_address, password, slot_name):
-        super().__init__(server_address, password, no_connection=False, print_list=False, print_count=False)
-        self.auth = slot_name
-        self.selected_slot_name = slot_name
+class IdleContext:
+    def __init__(self):
+        self.exit_event = asyncio.Event()
+        self.server_task = None
+        self.game = None
         self.temp_dir_obj = None
         self.reconnecting = False
+        self.items_received = []
+        self.locations_checked = set()
+        self.checked_locations = set()
+        self.missing_locations = set()
+        self.local_items = []
+        self.auth = "OOT"
+        self.selected_slot_name = "OOT"
+        
+    async def shutdown(self):
+        pass
 
     async def disconnect(self, allow_autoreconnect: bool = False):
-        if GUI_MODE:
-            if not getattr(self, "reconnecting", False):
-                print(json.dumps({"event": "disconnected"}), flush=True)
-        elif not SILENT_MODE:
-            print("\n[Info] Disconnecting from server...", flush=True)
-        await super().disconnect(allow_autoreconnect)
+        pass
 
-    async def connection_closed(self):
-        if GUI_MODE:
-            if not getattr(self, "reconnecting", False):
-                print(json.dumps({"event": "disconnected"}), flush=True)
-        elif not SILENT_MODE:
-            print("\n[Info] Connection closed.", file=sys.stderr, flush=True)
-        await super().connection_closed()
+# Dynamic initialization of heavy context modules
+_context_classes_initialized = False
+CLITrackerContext = None
+server_loop = None
+AutoWorldRegister = None
+TrackerWorld = None
 
-    def on_print(self, args: dict):
-        if not GUI_MODE and not SILENT_MODE:
-            print(f"[Server] {args['text']}", flush=True)
+def initialize_dynamic_imports(game_name=None):
+    global _context_classes_initialized, CLITrackerContext, server_loop, AutoWorldRegister, TrackerWorld, active_game_name
+    if _context_classes_initialized:
+        if game_name:
+            ensure_world_loaded(game_name)
+        return
+        
+    if game_name:
+        active_game_name = game_name
+        mapping = scan_available_worlds()
+        game_lower = game_name.lower()
+        if game_lower in mapping:
+            allowed_entries.add(mapping[game_lower][0])
+            allowed_entries.add(mapping[game_lower][0].lower())
+            
+    from tracker.TrackerClient import TrackerGameContext as TGC, server_loop as sl
+    from worlds.AutoWorld import AutoWorldRegister as AWR
+    from tracker import TrackerWorld as TW
+    
+    server_loop = sl
+    AutoWorldRegister = AWR
+    TrackerWorld = TW
+    
+    # Initialize settings
+    TrackerWorld._AutoWorldRegister__settings = SettingsDict({
+        "sorting_method": "apworld",
+        "include_location_name": True,
+        "include_region_name": False,
+        "hide_excluded_locations": False,
+        "use_split_map_icons": True,
+        "enforce_deferred_entrances": "default",
+        "display_glitched_logic": True,
+        "save_entered_commands": True,
+        "sorting_priorities": {},
+        "player_files_path": os.path.join(ap_dir, "Players")
+    })
+    
+    class DynamicCLITrackerContext(TGC):
+        def __init__(self, server_address, password, slot_name):
+            super().__init__(server_address, password, no_connection=False, print_list=False, print_count=False)
+            self.auth = slot_name
+            self.selected_slot_name = slot_name
+            self.temp_dir_obj = None
+            self.reconnecting = False
 
-    def on_print_json(self, args: dict):
-        if not GUI_MODE and not SILENT_MODE:
-            print(f"[Server] {self.jsontotextparser(args['data'])}", flush=True)
+        async def disconnect(self, allow_autoreconnect: bool = False):
+            if GUI_MODE:
+                if not getattr(self, "reconnecting", False):
+                    print(json.dumps({"event": "disconnected"}), flush=True)
+            elif not SILENT_MODE:
+                print("\n[Info] Disconnecting from server...", flush=True)
+            await super().disconnect(allow_autoreconnect)
 
-    def handle_connection_loss(self, msg: str) -> None:
-        if GUI_MODE:
-            print(json.dumps({"event": "error", "message": msg}), flush=True)
-        else:
-            if not SILENT_MODE:
-                import traceback
-                print(f"\n[Connection Loss] {msg}", file=sys.stderr, flush=True)
-                traceback.print_exc()
-        self.exit_event.set()
+        async def connection_closed(self):
+            if GUI_MODE:
+                if not getattr(self, "reconnecting", False):
+                    print(json.dumps({"event": "disconnected"}), flush=True)
+            elif not SILENT_MODE:
+                print("\n[Info] Connection closed.", file=sys.stderr, flush=True)
+            await super().connection_closed()
 
-    async def server_auth(self, password_requested: bool = False):
-        await self.send_connect(game=self.game)
+        def on_print(self, args: dict):
+            if not GUI_MODE and not SILENT_MODE:
+                print(f"[Server] {args['text']}", flush=True)
 
-    def updateTracker(self):
-        state = super().updateTracker()
-        self.print_accessible_checks(state)
-        return state
+        def on_print_json(self, args: dict):
+            if not GUI_MODE and not SILENT_MODE:
+                print(f"[Server] {self.jsontotextparser(args['data'])}", flush=True)
 
-    def on_package(self, cmd: str, args: dict):
-        try:
-            super().on_package(cmd, args)
-            if cmd == "Connected":
+        def handle_connection_loss(self, msg: str) -> None:
+            if GUI_MODE:
+                print(json.dumps({"event": "error", "message": msg}), flush=True)
+            else:
+                if not SILENT_MODE:
+                    import traceback
+                    print(f"\n[Connection Loss] {msg}", file=sys.stderr, flush=True)
+                    traceback.print_exc()
+            self.exit_event.set()
+
+        async def server_auth(self, password_requested: bool = False):
+            await self.send_connect(game=self.game)
+
+        def updateTracker(self):
+            state = super().updateTracker()
+            self.print_accessible_checks(state)
+            return state
+
+        def on_package(self, cmd: str, args: dict):
+            try:
+                super().on_package(cmd, args)
+                if cmd == "Connected":
+                    if GUI_MODE:
+                        print(json.dumps({
+                            "event": "connected",
+                            "slot": self.selected_slot_name,
+                            "game": self.game,
+                            "players": {pinfo.name: pinfo.game for pid, pinfo in args["slot_info"].items() if int(pid) != 0}
+                        }), flush=True)
+                    elif not SILENT_MODE:
+                        print("\n[Success] Connected to Archipelago server!", flush=True)
+            except Exception as e:
+                if GUI_MODE:
+                    print(json.dumps({"event": "error", "message": f"Package error: {e}"}), flush=True)
+                elif not SILENT_MODE:
+                    import traceback
+                    print(f"\n[Error processing package {cmd}] {traceback.format_exc()}", file=sys.stderr, flush=True)
+
+        def print_accessible_checks(self, state=None):
+            if state is None:
+                state = super().updateTracker()
+            try:
+                if self.server_locations:
+                    self.missing_locations = self.server_locations - self.checked_locations
+                    checked = len(self.server_locations.intersection(self.checked_locations))
+                    total = len(self.server_locations)
+                else:
+                    checked = len(self.checked_locations)
+                    total = self.total_locations if hasattr(self, "total_locations") else 0
+
+                accessible = len(state.in_logic_locations)
+
                 if GUI_MODE:
                     print(json.dumps({
-                        "event": "connected",
+                        "event": "stats",
                         "slot": self.selected_slot_name,
                         "game": self.game,
-                        "players": {pinfo.name: pinfo.game for pid, pinfo in args["slot_info"].items() if int(pid) != 0}
+                        "checked": checked,
+                        "total": total,
+                        "accessible": accessible
                     }), flush=True)
                 elif not SILENT_MODE:
-                    print("\n[Success] Connected to Archipelago server!", flush=True)
-        except Exception as e:
-            if GUI_MODE:
-                print(json.dumps({"event": "error", "message": f"Package error: {e}"}), flush=True)
-            elif not SILENT_MODE:
-                import traceback
-                print(f"\n[Error processing package {cmd}] {traceback.format_exc()}", file=sys.stderr, flush=True)
+                    print(f"\n==================================================", flush=True)
+                    print(f"Slot: {self.selected_slot_name} | Game: {self.game}", flush=True)
+                    print(f"Checks: {checked} / {total} checked", flush=True)
+                    print(f"Accessible (In Logic): {accessible}", flush=True)
+                    print(f"==================================================", flush=True)
 
-    def print_accessible_checks(self, state=None):
-        if state is None:
-            state = super().updateTracker()
-        try:
-            if self.server_locations:
-                self.missing_locations = self.server_locations - self.checked_locations
-                checked = len(self.server_locations.intersection(self.checked_locations))
-                total = len(self.server_locations)
-            else:
-                checked = len(self.checked_locations)
-                total = self.total_locations if hasattr(self, "total_locations") else 0
-
-            accessible = len(state.in_logic_locations)
-
-            if GUI_MODE:
-                print(json.dumps({
-                    "event": "stats",
-                    "slot": self.selected_slot_name,
-                    "game": self.game,
-                    "checked": checked,
-                    "total": total,
-                    "accessible": accessible
-                }), flush=True)
-            elif not SILENT_MODE:
-                print(f"\n==================================================", flush=True)
-                print(f"Slot: {self.selected_slot_name} | Game: {self.game}", flush=True)
-                print(f"Checks: {checked} / {total} checked", flush=True)
-                print(f"Accessible (In Logic): {accessible}", flush=True)
-                print(f"==================================================", flush=True)
-
-            # Export accessible locations and stats to files (useful for OBS overlays)
-            try:
-                import re
-                workspace_path = get_workspace_path()
-                
-                # 1. Remaining accessible checks list
-                out_file = os.path.join(workspace_path, "remaining_locations.txt")
-                with open(out_file, "w", encoding="utf-8") as f:
-                    f.write(f"--- {self.selected_slot_name} ({self.game}) - Accessible Checks ({accessible}) ---\n")
-                    for loc in state.readable_locations:
-                        clean_loc = re.sub(r"\[/?color.*?\]", "", loc)
-                        f.write(clean_loc + "\n")
-                
-                # 2. Combined stats file for OBS
-                stats_file = os.path.join(workspace_path, "obs_stats.txt")
-                with open(stats_file, "w", encoding="utf-8") as f:
-                    f.write(f"Slot: {self.selected_slot_name} | Game: {self.game}\n")
-                    f.write(f"Checks: {checked} / {total}\n")
-                    f.write(f"Accessible: {accessible}\n")
-                
-                # 3. Individual files for custom OBS formatting
-                with open(os.path.join(workspace_path, "obs_checks.txt"), "w", encoding="utf-8") as f:
-                    f.write(f"{checked} / {total}")
-                with open(os.path.join(workspace_path, "obs_accessible.txt"), "w", encoding="utf-8") as f:
-                    f.write(f"{accessible}")
-                with open(os.path.join(workspace_path, "obs_slot.txt"), "w", encoding="utf-8") as f:
-                    f.write(f"{self.selected_slot_name} ({self.game})")
+                # Export accessible locations and stats to files (useful for OBS overlays)
+                try:
+                    import re
+                    workspace_path = get_workspace_path()
                     
-                if not GUI_MODE and not SILENT_MODE:
-                    print(f"Updated OBS & remaining checks files.", flush=True)
-            except Exception as fe:
-                if not GUI_MODE and not SILENT_MODE:
-                    print(f"Error writing files: {fe}", file=sys.stderr, flush=True)
+                    # 1. Remaining accessible checks list
+                    out_file = os.path.join(workspace_path, "remaining_locations.txt")
+                    with open(out_file, "w", encoding="utf-8") as f:
+                        f.write(f"--- {self.selected_slot_name} ({self.game}) - Accessible Checks ({accessible}) ---\n")
+                        for loc in state.readable_locations:
+                            clean_loc = re.sub(r"\[/?color.*?\]", "", loc)
+                            f.write(clean_loc + "\n")
+                    
+                    # 2. Combined stats file for OBS
+                    stats_file = os.path.join(workspace_path, "obs_stats.txt")
+                    with open(stats_file, "w", encoding="utf-8") as f:
+                        f.write(f"Slot: {self.selected_slot_name} | Game: {self.game}\n")
+                        f.write(f"Checks: {checked} / {total}\n")
+                        f.write(f"Accessible: {accessible}\n")
+                    
+                    # 3. Individual files for custom OBS formatting
+                    with open(os.path.join(workspace_path, "obs_checks.txt"), "w", encoding="utf-8") as f:
+                        f.write(f"{checked} / {total}")
+                    with open(os.path.join(workspace_path, "obs_accessible.txt"), "w", encoding="utf-8") as f:
+                        f.write(f"{accessible}")
+                    with open(os.path.join(workspace_path, "obs_slot.txt"), "w", encoding="utf-8") as f:
+                        f.write(f"{self.selected_slot_name} ({self.game})")
+                        
+                    if not GUI_MODE and not SILENT_MODE:
+                        print(f"Updated OBS & remaining checks files.", flush=True)
+                except Exception as fe:
+                    if not GUI_MODE and not SILENT_MODE:
+                        print(f"Error writing files: {fe}", file=sys.stderr, flush=True)
 
-        except Exception as e:
-            if GUI_MODE:
-                print(json.dumps({"event": "error", "message": f"Logic error: {e}"}), flush=True)
-            elif not SILENT_MODE:
-                import traceback
-                print(f"Error updating tracker logic: {traceback.format_exc()}", file=sys.stderr, flush=True)
+            except Exception as e:
+                if GUI_MODE:
+                    print(json.dumps({"event": "error", "message": f"Logic error: {e}"}), flush=True)
+                elif not SILENT_MODE:
+                    import traceback
+                    print(f"Error updating tracker logic: {traceback.format_exc()}", file=sys.stderr, flush=True)
+
+    CLITrackerContext = DynamicCLITrackerContext
+    if game_name:
+        ensure_world_loaded(game_name)
+    _context_classes_initialized = True
+
 
 
 def get_game_from_yaml(players_dir, slot_name):
@@ -458,9 +652,9 @@ async def main():
 
     has_args = bool(server_resolved or slot_resolved)
 
-    # If another instance of the tracker is already running on the control port,
-    # send a TCP command to it to connect to the new server/slot/password/game and then exit.
     if has_args:
+        import time
+        t_tcp_start = time.time()
         control_port = 38283
         try:
             port_idx = sys.argv.index("--control-port")
@@ -469,8 +663,13 @@ async def main():
             pass
 
         for port in range(control_port, control_port + 5):
+            t_port_start = time.time()
             try:
-                reader, writer = await asyncio.open_connection('127.0.0.1', port)
+                # Add a timeout of 0.2 seconds to prevent hanging on closed ports
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection('127.0.0.1', port),
+                    timeout=0.2
+                )
                 server_to_send = server
                 if "archipelago.gg" in server_to_send and not server_to_send.startswith(("ws://", "wss://")):
                     server_to_send = f"wss://{server_to_send}"
@@ -501,6 +700,13 @@ async def main():
                     return
             except Exception:
                 pass
+            finally:
+                t_port_elapsed = time.time() - t_port_start
+                if not SILENT_MODE and t_port_elapsed > 0.05:
+                    print(f"[Timer] Checked port {port} in {t_port_elapsed:.3f}s", flush=True)
+
+        if not SILENT_MODE:
+            print(f"[Timer] Total duplicate instance check took: {time.time() - t_tcp_start:.3f}s", flush=True)
 
     if not GUI_MODE and not SILENT_MODE and not has_args:
         print("=== Archipelago CLI Universal Tracker ===")
@@ -523,17 +729,20 @@ async def main():
         pass
 
     if idle_mode:
-        ctx = CLITrackerContext("localhost:38281", None, "OOT")
+        ctx = IdleContext()
         ctx.game = None
         ctx.temp_dir_obj = None
         ctx.server_task = None
     else:
+        import time
+        t_start = time.time()
         if "archipelago.gg" in server and not server.startswith(("ws://", "wss://")):
             server = f"wss://{server}"
         elif ":" not in server and not server.startswith(("ws://", "wss://")):
             server = f"localhost:{server}"
 
         # 1. Resolve game and copy YAML
+        t_yaml_start = time.time()
         res = get_game_from_yaml(players_dir, slot_name)
         if res is None:
             if game_name is None:
@@ -557,6 +766,11 @@ async def main():
             }
             with open(os.path.join(temp_dir, "dummy.yaml"), "w", encoding="utf-8") as f:
                 json.dump(dummy_data, f)
+            t_import_start = time.time()
+            initialize_dynamic_imports(game_name)
+            t_import_end = time.time()
+            if not SILENT_MODE:
+                print(f"[Timer] Dynamic imports took: {t_import_end - t_import_start:.3f}s", flush=True)
             TrackerWorld._AutoWorldRegister__settings["player_files_path"] = temp_dir
         else:
             game_name, file_path, file_name = res
@@ -588,6 +802,12 @@ async def main():
             with open(os.path.join(temp_dir, file_name), "w", encoding="utf-8") as f:
                 f.write(yaml_content)
                 
+            t_import_start = time.time()
+            initialize_dynamic_imports(game_name)
+            t_import_end = time.time()
+            if not SILENT_MODE:
+                print(f"[Timer] Resolving YAML took: {t_import_start - t_yaml_start:.3f}s", flush=True)
+                print(f"[Timer] Dynamic imports took: {t_import_end - t_import_start:.3f}s", flush=True)
             TrackerWorld._AutoWorldRegister__settings["player_files_path"] = temp_dir
 
         # 2. Initialize context
@@ -622,7 +842,11 @@ async def main():
             print("Running Archipelago logic generator...")
         
         try:
+            t_gen_start = time.time()
             ctx.run_generator()
+            t_gen_end = time.time()
+            if not SILENT_MODE:
+                print(f"[Timer] Archipelago logic generator took: {t_gen_end - t_gen_start:.3f}s", flush=True)
             cli_multiworld_cache[slot_name] = (
                 ctx.tracker_core.multiworld,
                 ctx.tracker_core.launch_multiworld,
@@ -669,11 +893,14 @@ async def main():
     async def disconnect_tracker():
         task = getattr(ctx, "server_task", None)
         if task and not task.done():
-            await ctx.disconnect(allow_autoreconnect=False)
+            try:
+                await asyncio.wait_for(ctx.disconnect(allow_autoreconnect=False), timeout=1.0)
+            except Exception:
+                pass
             task.cancel()
             try:
-                await task
-            except asyncio.CancelledError:
+                await asyncio.wait_for(task, timeout=1.0)
+            except Exception:
                 pass
         ctx.items_received = []
         ctx.locations_checked = set()
@@ -696,8 +923,7 @@ async def main():
             print("[Info] Disconnected.", flush=True)
 
     async def reconnect_tracker(data):
-        nonlocal temp_dir_obj
-        ctx.reconnecting = True
+        nonlocal temp_dir_obj, ctx
         r_server = data.get("server") or server
         r_slot = data.get("slot") or slot_name
         r_password = data.get("password") or password
@@ -711,13 +937,32 @@ async def main():
         # 1. Disconnect current session
         task = getattr(ctx, "server_task", None)
         if task and not task.done():
-            await ctx.disconnect(allow_autoreconnect=False)
+            try:
+                await asyncio.wait_for(ctx.disconnect(allow_autoreconnect=False), timeout=1.0)
+            except Exception:
+                pass
             task.cancel()
             try:
-                await task
-            except asyncio.CancelledError:
+                await asyncio.wait_for(task, timeout=1.0)
+            except Exception:
                 pass
 
+        # Parse game if not set yet (we might need to search the YAML files)
+        if not r_game:
+            res = get_game_from_yaml(players_dir, r_slot)
+            if res:
+                r_game = res[0]
+            else:
+                r_game = "Ocarina of Time"
+
+        # Initialize the heavy dependencies now that we know the game name
+        initialize_dynamic_imports(r_game)
+        if isinstance(ctx, IdleContext):
+            # Transition to a real context
+            ctx = CLITrackerContext(r_server, r_password, r_slot)
+            ctx.game = r_game
+
+        ctx.reconnecting = True
         ctx.items_received = []
         ctx.locations_checked = set()
         ctx.checked_locations = set()

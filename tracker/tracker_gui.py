@@ -380,10 +380,13 @@ class App:
         self.root.destroy()
 
 if __name__ == "__main__":
+    import time
+    t0 = time.time()
     is_cli_exe = "AP_Mini_Tracker_CLI" in os.path.basename(sys.argv[0])
     if is_cli_exe or any(arg in sys.argv for arg in ("--gui", "--cli", "--silent")):
         import asyncio
         import tracker_cli
+        print(f"[Timer] Script imports and CLI initialization took: {time.time() - t0:.3f}s", flush=True)
         if sys.platform == 'win32':
             asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
         try:
