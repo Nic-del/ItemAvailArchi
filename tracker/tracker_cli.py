@@ -52,15 +52,20 @@ if "--silent" in sys.argv:
     sys.stderr = open(os.path.join(get_workspace_path(), "tracker_error.log"), 'w', buffering=1, encoding="utf-8")
     sys.stderr.write("=== Tracker CLI Started in Silent Mode ===\n")
 
-# Try local portable directories first, fall back to default global location
-base_dir = os.path.dirname(tracker_dir)
-portable_ap_dir = os.path.join(base_dir, "Archipelago")
-if os.path.exists(portable_ap_dir):
-    ap_dir = portable_ap_dir
-elif os.path.exists(os.path.join(tracker_dir, "Archipelago")):
-    ap_dir = os.path.join(tracker_dir, "Archipelago")
+# Try custom paths (command-line argument or environment variable) first, then local portable directories, then default global location
+if "--ap-dir" in sys.argv:
+    ap_dir = sys.argv[sys.argv.index("--ap-dir") + 1]
+elif os.environ.get("AP_DIR"):
+    ap_dir = os.environ.get("AP_DIR")
 else:
-    ap_dir = r"C:\ProgramData\Archipelago"
+    base_dir = os.path.dirname(tracker_dir)
+    portable_ap_dir = os.path.join(base_dir, "Archipelago")
+    if os.path.exists(portable_ap_dir):
+        ap_dir = portable_ap_dir
+    elif os.path.exists(os.path.join(tracker_dir, "Archipelago")):
+        ap_dir = os.path.join(tracker_dir, "Archipelago")
+    else:
+        ap_dir = r"C:\ProgramData\Archipelago"
 
 ap_source_dir = os.environ.get("AP_SOURCE_DIR", "")
 
