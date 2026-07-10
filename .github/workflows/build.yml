@@ -51,6 +51,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller kivy kivymd orjson bsdiff4 jinja2 requests websocket-client
 
+      - name: Configure Kivy Headless
+        run: |
+          python -c "import pathlib; p = pathlib.Path.home() / '.kivy'; p.mkdir(exist_ok=True); (p / 'config.ini').write_text('[graphics]\nwindow = dummy\n')"
+
       - name: Build Executable with PyInstaller
         env:
           ARCHIPELAGO_PATH: ${{ github.workspace }}/Archipelago-main
