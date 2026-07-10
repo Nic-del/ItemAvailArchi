@@ -54,6 +54,10 @@ jobs:
       - name: Build Executable with PyInstaller
         env:
           ARCHIPELAGO_PATH: ${{ github.workspace }}/Archipelago-main
+          KIVY_NO_ARGS: "1"
+          KIVY_NO_CONSOLELOG: "1"
+          KIVY_NO_FILELOG: "1"
+          KIVY_WINDOW: "dummy"
         run: |
           pyinstaller AP_Mini_Tracker.spec
 
