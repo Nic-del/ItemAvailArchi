@@ -47,7 +47,7 @@ def collect_submodules_no_import(package_name):
     return submodules
 
 a = Analysis(
-    ['tracker\\tracker_gui.py'],
+    ['tracker/tracker_gui.py'],
     pathex=[ap_path],
     binaries=[],
     datas=[

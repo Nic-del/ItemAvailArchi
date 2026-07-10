@@ -6,3 +6,4 @@ bsdiff4
 jinja2
 requests
 websocket-client
+pyyaml
