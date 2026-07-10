@@ -24,8 +24,8 @@ This project is built upon the work of the team behind the [Universal Tracker](h
 ### ⚠️ Essential Prerequisites
 
 For the tracker to work correctly, you must:
-1. **Install the `.apworld` files** corresponding to the games in your multiworld into your local Archipelago installation folder (typically `%localappdata%/Archipelago/lib/worlds/`).
-2. **Place the game configuration `.yaml` files** in the `players` directory (located in the same folder as the executable, or specified via the `--players-dir` argument).
+1. **Install the `.apworld` files** corresponding to the games in your multiworld into your local Archipelago installation folder (typically `%localappdata%/Archipelago/custom_worlds/`).
+2. **Place the game configuration `.yaml` files** in the `players` directory (or specified via the `--players-dir` argument).
 
 ---
 
@@ -127,8 +127,8 @@ Ce projet se base sur le travail réalisé par l'équipe d' [Universal Tracker](
 ### ⚠️ Prérequis indispensables
 
 Pour que le tracker fonctionne correctement, vous devez :
-1. **Installer les fichiers `.apworld`** correspondants aux jeux de votre multiworld dans votre dossier Archipelago local (généralement `%localappdata%/Archipelago/lib/worlds/`).
-2. **Placer les fichiers `.yaml`** de configuration de la partie dans le dossier `players` (situé au même endroit que l'exécutable, ou spécifié via l'argument `--players-dir`).
+1. **Installer les fichiers `.apworld`** correspondants aux jeux de votre multiworld dans votre dossier Archipelago local (généralement `%localappdata%/Archipelago/custom_worlds/`).
+2. **Placer les fichiers `.yaml`** de configuration de la partie dans le dossier `players` (ou spécifié via l'argument `--players-dir`).
 
 ---
 

@@ -35,3 +35,7 @@ env/
 *.njsproj
 *.sln
 *.swp
+
+# Portable build files
+AP_Mini_Tracker_Portable/
+

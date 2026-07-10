@@ -62,7 +62,7 @@ elif os.path.exists(os.path.join(tracker_dir, "Archipelago")):
 else:
     ap_dir = r"C:\ProgramData\Archipelago"
 
-ap_source_dir = r"C:\Users\Linksweld\Downloads\Archipelago-main\Archipelago-main"
+ap_source_dir = os.environ.get("AP_SOURCE_DIR", "")
 
 # Only append external libraries and source paths to sys.path when running in source mode.
 # When frozen, PyInstaller already contains all the dependencies compiled for the correct Python version.
