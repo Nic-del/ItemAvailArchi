@@ -1,5 +1,5 @@
 pyinstaller
-kivy
+kivy[base]
 kivymd
 orjson
 bsdiff4
