@@ -14,11 +14,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
         include:
-          - os: windows-latest
-            artifact_name: AP_Mini_Tracker-Windows.zip
-            output_dir: dist/AP_Mini_Tracker
           - os: ubuntu-latest
             artifact_name: AP_Mini_Tracker-Linux.tar.gz
             output_dir: dist/AP_Mini_Tracker
@@ -65,10 +62,7 @@ jobs:
         run: |
           pyinstaller AP_Mini_Tracker.spec
 
-      - name: Package Artifacts (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          powershell Compress-Archive -Path ${{ matrix.output_dir }} -DestinationPath ${{ matrix.artifact_name }}
+
 
       - name: Package Artifacts (Linux)
         if: matrix.os == 'ubuntu-latest'
@@ -101,7 +95,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            windows-latest-build/AP_Mini_Tracker-Windows.zip
             ubuntu-latest-build/AP_Mini_Tracker-Linux.tar.gz
             macos-latest-build/AP_Mini_Tracker-macOS.zip
         env:
