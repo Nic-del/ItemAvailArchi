@@ -1,0 +1,100 @@
+name: Build and Release AP Mini Tracker
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        include:
+          - os: windows-latest
+            artifact_name: AP_Mini_Tracker-Windows.zip
+            output_dir: dist/AP_Mini_Tracker
+          - os: ubuntu-latest
+            artifact_name: AP_Mini_Tracker-Linux.tar.gz
+            output_dir: dist/AP_Mini_Tracker
+          - os: macos-latest
+            artifact_name: AP_Mini_Tracker-macOS.zip
+            output_dir: dist/AP_Mini_Tracker
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Download Archipelago Source
+        run: |
+          git clone --depth 1 --branch main https://github.com/ArchipelagoMW/Archipelago.git Archipelago-main
+
+      - name: Install System Dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl-dev libegl-dev libgl1-mesa-dev libx11-dev libmtdev-dev xclip xsel libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller kivy kivymd orjson bsdiff4 jinja2 requests websocket-client
+
+      - name: Build Executable with PyInstaller
+        env:
+          ARCHIPELAGO_PATH: ${{ github.workspace }}/Archipelago-main
+        run: |
+          pyinstaller AP_Mini_Tracker.spec
+
+      - name: Package Artifacts (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          powershell Compress-Archive -Path ${{ matrix.output_dir }} -DestinationPath ${{ matrix.artifact_name }}
+
+      - name: Package Artifacts (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          tar -czvf ${{ matrix.artifact_name }} -C dist AP_Mini_Tracker
+
+      - name: Package Artifacts (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          zip -r ${{ matrix.artifact_name }} dist/AP_Mini_Tracker
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-build
+          path: ${{ matrix.artifact_name }}
+
+  release:
+    name: Create Release and Upload Assets
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Release on GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            windows-latest-build/AP_Mini_Tracker-Windows.zip
+            ubuntu-latest-build/AP_Mini_Tracker-Linux.tar.gz
+            macos-latest-build/AP_Mini_Tracker-macOS.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
