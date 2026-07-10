@@ -25,6 +25,27 @@ kivy_data_dir = os.path.join(os.path.dirname(kivy.__file__), 'data')
 
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
+def collect_submodules_no_import(package_name):
+    import importlib.util
+    import os
+    spec = importlib.util.find_spec(package_name)
+    if not spec or not spec.submodule_search_locations:
+        return []
+    package_path = spec.submodule_search_locations[0]
+    submodules = []
+    for root, dirs, files in os.walk(package_path):
+        for file in files:
+            if file.endswith('.py') and file != '__init__.py':
+                rel_path = os.path.relpath(os.path.join(root, file[:-3]), package_path)
+                mod_name = package_name + '.' + rel_path.replace(os.sep, '.')
+                submodules.append(mod_name)
+        for d in dirs:
+            if os.path.exists(os.path.join(root, d, '__init__.py')):
+                rel_path = os.path.relpath(os.path.join(root, d), package_path)
+                mod_name = package_name + '.' + rel_path.replace(os.sep, '.')
+                submodules.append(mod_name)
+    return submodules
+
 a = Analysis(
     ['tracker\\tracker_gui.py'],
     pathex=[ap_path],
@@ -35,7 +56,7 @@ a = Analysis(
         (os.path.join(ap_path, 'data'), 'data'),
         (os.path.join(ap_path, 'worlds'), 'worlds')
     ] + collect_data_files('kivymd'),
-    hiddenimports=collect_submodules('kivymd') + collect_submodules('worlds') + ['bsdiff4', 'bsdiff4.core', 'orjson', 'jinja2', 'requests'],
+    hiddenimports=collect_submodules_no_import('kivymd') + collect_submodules('worlds') + ['bsdiff4', 'bsdiff4.core', 'orjson', 'jinja2', 'requests'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
