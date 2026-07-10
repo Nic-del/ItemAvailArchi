@@ -1,5 +1,12 @@
 import sys
 import os
+
+# Disable Kivy window provider initialization during PyInstaller build execution on headless runners
+os.environ["KIVY_NO_ARGS"] = "1"
+os.environ["KIVY_NO_CONSOLELOG"] = "1"
+os.environ["KIVY_NO_FILELOG"] = "1"
+os.environ["KIVY_WINDOW"] = "dummy"
+
 import kivy
 
 # Determine Archipelago source path dynamically
