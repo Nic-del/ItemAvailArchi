@@ -426,6 +426,15 @@ if __name__ == "__main__":
             pass
         except Exception as e:
             import traceback
+            try:
+                if getattr(sys, 'frozen', False):
+                    w_path = os.path.dirname(sys.executable)
+                else:
+                    w_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                with open(os.path.join(w_path, "tracker_debug.log"), "a", encoding="utf-8") as f:
+                    f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] FATAL EXCEPTION in CLI Subprocess: {e}\n{traceback.format_exc()}\n")
+            except Exception:
+                pass
             if "--silent" in sys.argv:
                 try:
                     if getattr(sys, 'frozen', False):

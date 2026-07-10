@@ -2,6 +2,7 @@ import sys
 import os
 import logging
 import json
+import time
 import asyncio
 import tempfile
 import re
@@ -161,12 +162,21 @@ if "--silent" not in sys.argv:
 
 
 
+def log_debug(msg):
+    try:
+        log_path = os.path.join(get_workspace_path(), "tracker_debug.log")
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
+    except Exception:
+        pass
+
 # Fast scanning & selective loading structures
 import re
 import zipfile
 import json
 import importlib
 import importlib.util
+import traceback
 
 game_to_world_file = {}
 active_game_name = None
@@ -177,6 +187,7 @@ def scan_available_worlds():
     if game_to_world_file:
         return game_to_world_file
 
+    log_debug("Starting scan_available_worlds...")
     paths_to_scan = []
     
     local_worlds_dir = None
@@ -196,7 +207,22 @@ def scan_available_worlds():
     if os.path.exists(custom_worlds_dir):
         paths_to_scan.append((custom_worlds_dir, False))
 
+    # Also scan user-specific custom worlds directory in Local AppData
+    localappdata = os.environ.get("LOCALAPPDATA")
+    if localappdata:
+        user_custom_worlds_dir = os.path.join(localappdata, "Archipelago", "custom_worlds")
+        if os.path.exists(user_custom_worlds_dir) and user_custom_worlds_dir != custom_worlds_dir:
+            paths_to_scan.append((user_custom_worlds_dir, False))
+
+    # Always scan the global ProgramData custom_worlds directory as well
+    global_custom_worlds = r"C:\ProgramData\Archipelago\custom_worlds"
+    if os.path.exists(global_custom_worlds) and global_custom_worlds != custom_worlds_dir:
+        paths_to_scan.append((global_custom_worlds, False))
+
+    log_debug(f"Paths to scan: {[p[0] for p in paths_to_scan]}")
+
     for folder, is_relative in paths_to_scan:
+        log_debug(f"Scanning folder: {folder}")
         try:
             for entry in orig_scandir(folder):
                 if entry.name.startswith(("_", ".")):
@@ -207,13 +233,18 @@ def scan_available_worlds():
                         try:
                             with open(init_path, "r", encoding="utf-8-sig") as f:
                                 chunk = f.read()
-                            match = re.search(r'\bgame\s*(?::\s*\w+)?\s*=\s*(?:"([^"]+)"|\'([^\']+)\')', chunk)
+                            match = re.search(r'\bgame\s*(?::\s*[^=]+)?\s*=\s*(?:"([^"]+)"|\'([^\']+)\')', chunk)
                             if match:
                                 game = match.group(1) or match.group(2)
                                 game_to_world_file[game.lower()] = (entry.name, False)
-                        except Exception:
-                            pass
+                                log_debug(f"Found folder-world: '{game}' in '{entry.name}'")
+                            elif entry.name == "ladx":
+                                game_to_world_file["links awakening dx"] = ("ladx", False)
+                                log_debug("Found folder-world: 'Links Awakening DX' via hardcoded fallback in 'ladx'")
+                        except Exception as e:
+                            log_debug(f"Error scanning folder-world '{entry.name}': {e}")
                 elif entry.is_file() and entry.name.endswith(".apworld"):
+                    log_debug(f"Found .apworld file: {entry.name}")
                     try:
                         with zipfile.ZipFile(entry.path, "r") as z:
                             found = False
@@ -225,23 +256,26 @@ def scan_available_worlds():
                                         if game:
                                             game_to_world_file[game.lower()] = (entry.name, True)
                                             found = True
+                                            log_debug(f"Found zip-world from manifest: '{game}' in '{entry.name}'")
                                     break
                             if not found:
                                 for name in z.namelist():
                                     if name.endswith("__init__.py") and name.count('/') <= 1:
                                         with z.open(name) as f:
                                             chunk = f.read().decode("utf-8", errors="ignore")
-                                        match = re.search(r'\bgame\s*(?::\s*\w+)?\s*=\s*(?:"([^"]+)"|\'([^\']+)\')', chunk)
+                                        match = re.search(r'\bgame\s*(?::\s*[^=]+)?\s*=\s*(?:"([^"]+)"|\'([^\']+)\')', chunk)
                                         if match:
                                             game = match.group(1) or match.group(2)
                                             game_to_world_file[game.lower()] = (entry.name, True)
+                                            log_debug(f"Found zip-world from __init__.py: '{game}' in '{entry.name}'")
                                         break
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                    except Exception as e:
+                        log_debug(f"Error scanning zip-world '{entry.name}': {e}")
+        except Exception as e:
+            log_debug(f"Error scanning folder '{folder}': {e}")
 
     game_to_world_file["generic"] = ("generic", False)
+    log_debug(f"Available worlds mapping: {game_to_world_file}")
     return game_to_world_file
 
 def find_matching_game(name, keys):
@@ -265,6 +299,7 @@ def find_matching_game(name, keys):
     return None
 
 def ensure_world_loaded(game_name):
+    log_debug(f"ensure_world_loaded called for '{game_name}'")
     if not game_name:
         return True
     
@@ -284,17 +319,33 @@ def ensure_world_loaded(game_name):
     allowed_entries.add(entry_name)
     allowed_entries.add(entry_name.lower())
 
+    log_debug(f"ensure_world_loaded called for '{game_name}' (matched: '{matched_game}', entry: '{entry_name}', zip: {is_zip})")
+
     if not is_zip:
         try:
+            log_debug(f"Attempting to import folder-world module 'worlds.{entry_name}'")
             importlib.import_module(f"worlds.{entry_name}")
+            log_debug(f"Successfully imported 'worlds.{entry_name}'")
             return True
         except Exception as e:
+            tb = traceback.format_exc()
+            log_debug(f"Failed to dynamically import worlds.{entry_name}: {e}\n{tb}")
             sys.stderr.write(f"Failed to dynamically import worlds.{entry_name}: {e}\n")
             return False
     else:
         try:
             custom_worlds_dir = os.path.join(ap_dir, "custom_worlds")
             apworld_path = os.path.join(custom_worlds_dir, entry_name)
+            if not os.path.exists(apworld_path):
+                localappdata = os.environ.get("LOCALAPPDATA")
+                if localappdata:
+                    user_custom_worlds = os.path.join(localappdata, "Archipelago", "custom_worlds")
+                    if os.path.exists(os.path.join(user_custom_worlds, entry_name)):
+                        apworld_path = os.path.join(user_custom_worlds, entry_name)
+            if not os.path.exists(apworld_path):
+                global_custom_worlds = r"C:\ProgramData\Archipelago\custom_worlds"
+                if os.path.exists(os.path.join(global_custom_worlds, entry_name)):
+                    apworld_path = os.path.join(global_custom_worlds, entry_name)
             if not os.path.exists(apworld_path):
                 local_worlds_dir = None
                 if os.path.exists(ap_source_dir):
@@ -306,6 +357,7 @@ def ensure_world_loaded(game_name):
                 if local_worlds_dir:
                     apworld_path = os.path.join(local_worlds_dir, entry_name)
             
+            log_debug(f"Attempting to import zip-world '{entry_name}' from path '{apworld_path}'")
             import zipimport
             from pathlib import Path
             importer = zipimport.zipimporter(apworld_path)
@@ -316,8 +368,13 @@ def ensure_world_loaded(game_name):
                 module = importlib.util.module_from_spec(spec)
                 sys.modules[f"worlds.{world_name}"] = module
                 spec.loader.exec_module(module)
+                log_debug(f"Successfully imported worlds.{world_name} from zip")
                 return True
+            else:
+                log_debug(f"Spec not found for worlds.{world_name} inside the zip")
         except Exception as e:
+            tb = traceback.format_exc()
+            log_debug(f"Failed to dynamically load apworld {entry_name}: {e}\n{tb}")
             sys.stderr.write(f"Failed to dynamically load apworld {entry_name}: {e}\n")
             return False
     return False
@@ -487,6 +544,8 @@ def initialize_dynamic_imports(game_name=None):
                 print(f"[Server] {self.jsontotextparser(args['data'])}", flush=True)
 
         def handle_connection_loss(self, msg: str) -> None:
+            if getattr(self, "reconnecting", False):
+                return
             if GUI_MODE:
                 print(json.dumps({"event": "error", "message": msg}), flush=True)
             else:
@@ -868,12 +927,16 @@ async def main():
         if connected_cls is None:
             from worlds import failed_world_loads
             error_msg = f"Game '{game_name}' is not installed in the active environment."
+            log_debug(f"Game check failed for '{game_name}'. Available games in world_types: {list(AutoWorldRegister.world_types.keys())}")
+            log_debug(f"failed_world_loads entries: {list(failed_world_loads.keys())}")
             matching_failures = []
             for name, tb in failed_world_loads.items():
+                log_debug(f"Checking failed load '{name}' against '{game_name}'")
                 if game_name.lower() in name.lower() or "albw" in name.lower() or name.lower() in game_name.lower():
                     matching_failures.append(f"World '{name}' failed to load:\n{tb}")
             if matching_failures:
                 error_msg += "\n\nLoading errors:\n" + "\n".join(matching_failures)
+                log_debug(f"Found matching failed loads: {matching_failures}")
 
             if GUI_MODE:
                 print(json.dumps({"event": "error", "message": error_msg}), flush=True)
@@ -1137,12 +1200,16 @@ async def main():
         if connected_cls is None:
             from worlds import failed_world_loads
             error_msg = f"Game '{r_game}' is not installed in the active environment."
+            log_debug(f"Game check failed during connection update for '{r_game}'. Available games in world_types: {list(AutoWorldRegister.world_types.keys())}")
+            log_debug(f"failed_world_loads entries: {list(failed_world_loads.keys())}")
             matching_failures = []
             for name, tb in failed_world_loads.items():
+                log_debug(f"Checking failed load '{name}' against '{r_game}'")
                 if r_game.lower() in name.lower() or "albw" in name.lower() or name.lower() in r_game.lower():
                     matching_failures.append(f"World '{name}' failed to load:\n{tb}")
             if matching_failures:
                 error_msg += "\n\nLoading errors:\n" + "\n".join(matching_failures)
+                log_debug(f"Found matching failed loads during update: {matching_failures}")
 
             if GUI_MODE:
                 print(json.dumps({"event": "error", "message": error_msg}), flush=True)
@@ -1312,3 +1379,10 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\nStopped.")
+    except Exception as e:
+        import traceback
+        try:
+            log_debug(f"FATAL EXCEPTION in main: {e}\n{traceback.format_exc()}")
+        except Exception:
+            pass
+        raise e
