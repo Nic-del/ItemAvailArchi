@@ -2,12 +2,39 @@ import kivy
 import pathlib
 import os
 
+# 1. Patch kivy/metrics.py to prevent get_dpi() from crashing when headless
+metrics_path = pathlib.Path(kivy.__file__).parent / 'metrics.py'
+if metrics_path.exists():
+    c = metrics_path.read_text(encoding='utf-8')
+    target_code = "def get_dpi():\n    EventLoop.ensure_window()\n    return EventLoop.window.dpi"
+    # Also handle CRLF
+    target_code_crlf = target_code.replace("\n", "\r\n")
+    
+    replacement_code = """def get_dpi():
+    try:
+        from kivy.base import EventLoop
+        if EventLoop.window:
+            return EventLoop.window.dpi
+    except:
+        pass
+    return 96.0"""
+
+    if target_code in c:
+        metrics_path.write_text(c.replace(target_code, replacement_code), encoding='utf-8')
+        print("kivy/metrics.py patched successfully.")
+    elif target_code_crlf in c:
+        metrics_path.write_text(c.replace(target_code_crlf, replacement_code), encoding='utf-8')
+        print("kivy/metrics.py (CRLF) patched successfully.")
+    elif "return 96.0" in c:
+        print("kivy/metrics.py already patched.")
+    else:
+        print("Warning: Could not find target get_dpi code in kivy/metrics.py")
+else:
+    print("Warning: kivy/metrics.py not found.")
+
+# 2. Patch kivy/__init__.py for environment variables
 p = pathlib.Path(kivy.__file__)
 c = p.read_text(encoding='utf-8')
-
-print(f"Target file: {p}")
-print(f"Original start: {repr(c[:100])}")
-
 patch_code = """import os
 os.environ["KIVY_WINDOW"] = "dummy"
 os.environ["KIVY_NO_ARGS"] = "1"
@@ -17,13 +44,9 @@ os.environ["KIVY_LOG_LEVEL"] = "debug"
 os.environ["SDL_VIDEODRIVER"] = "dummy"
 """
 
-# Normalize newlines for comparison
 c_normalized = c.replace("\r\n", "\n")
 if not c_normalized.startswith("import os\nos.environ[\"KIVY_WINDOW\"]"):
     p.write_text(patch_code + c, encoding='utf-8')
-    print("Kivy patched successfully for headless build.")
-    # Verify the write
-    c_verify = p.read_text(encoding='utf-8')
-    print(f"Patched start: {repr(c_verify[:250])}")
+    print("kivy/__init__.py patched successfully.")
 else:
-    print("Kivy already patched.")
+    print("kivy/__init__.py already patched.")
