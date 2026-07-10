@@ -180,7 +180,9 @@ def scan_available_worlds():
     paths_to_scan = []
     
     local_worlds_dir = None
-    if os.path.exists(ap_source_dir):
+    if getattr(sys, 'frozen', False):
+        local_worlds_dir = os.path.join(sys._MEIPASS, "worlds")
+    elif os.path.exists(ap_source_dir):
         local_worlds_dir = os.path.join(ap_source_dir, "worlds")
     elif os.path.exists(os.path.join(ap_dir, "lib", "worlds")):
         local_worlds_dir = os.path.join(ap_dir, "lib", "worlds")
