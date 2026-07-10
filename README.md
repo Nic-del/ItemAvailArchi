@@ -55,6 +55,7 @@ Both executables accept command line arguments to automate connection.
 | `--slot <name>` | `-s` | Your slot (player) name in the game. |
 | `--password <pwd>` | `-p` | Server password (if configured). |
 | `--players-dir <path>` | - | Path to the folder containing players' YAML files (default: `./players`). |
+| `--ap-dir <path>` | - | Custom path to the Archipelago installation directory. |
 | `--silent` | - | Disables verbose information logs in the console. |
 
 #### Usage Examples:
@@ -158,6 +159,7 @@ Les deux exécutables acceptent des arguments en ligne de commande pour automati
 | `--slot <nom>` | `-s` | Nom de votre slot (joueur) dans la partie. |
 | `--password <mdp>` | `-p` | Mot de passe du serveur (si configuré). |
 | `--players-dir <chemin>` | - | Chemin vers le dossier contenant les fichiers YAML des joueurs (par défaut : `./players`). |
+| `--ap-dir <chemin>` | - | Chemin personnalisé vers le répertoire d'installation d'Archipelago. |
 | `--silent` | - | Désactive les logs d'information verbeux dans la console. |
 
 #### Exemples d'utilisation :
