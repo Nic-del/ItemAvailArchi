@@ -53,7 +53,7 @@ jobs:
 
       - name: Configure Kivy Headless
         run: |
-          python -c "import kivy, pathlib; p = pathlib.Path(kivy.__file__); c = p.read_text(encoding='utf-8'); p.write_text('import os\nos.environ[\"KIVY_WINDOW\"]=\"dummy\"\nos.environ[\"KIVY_NO_ARGS\"]=\"1\"\nos.environ[\"KIVY_NO_CONSOLELOG\"]=\"0\"\nos.environ[\"KIVY_NO_FILELOG\"]=\"1\"\nos.environ[\"KIVY_LOG_LEVEL\"]=\"debug\"\nos.environ[\"SDL_VIDEODRIVER\"]=\"dummy\"\n' + c, encoding='utf-8')"
+          python patch_kivy.py
 
       - name: Build Executable with PyInstaller
         env:
