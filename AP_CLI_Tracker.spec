@@ -1,6 +1,8 @@
 import sys
 import os
 sys.path.insert(0, 'C:\\Users\\Linksweld\\Downloads\\Archipelago-main\\Archipelago-main')
+sys.path.insert(0, os.path.abspath('.'))
+sys.path.insert(0, os.path.abspath('./tracker'))
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 a = Analysis(

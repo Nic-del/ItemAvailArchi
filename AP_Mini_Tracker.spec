@@ -19,6 +19,8 @@ if not ap_path:
         ap_path = os.path.abspath('./Archipelago-main')
 
 sys.path.insert(0, ap_path)
+sys.path.insert(0, os.path.abspath('.'))
+sys.path.insert(0, os.path.abspath('./tracker'))
 
 # Dynamically locate Kivy data directory
 kivy_data_dir = os.path.join(os.path.dirname(kivy.__file__), 'data')
