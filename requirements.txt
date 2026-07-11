@@ -10,3 +10,4 @@ pyyaml
 pathspec
 websockets
 schema
+colorama
