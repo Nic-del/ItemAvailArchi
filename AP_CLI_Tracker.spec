@@ -11,7 +11,7 @@ a = Analysis(
         ('C:\\Users\\Linksweld\\Downloads\\Archipelago-main\\Archipelago-main\\data', 'data'),
         ('C:\\Users\\Linksweld\\Downloads\\Archipelago-main\\Archipelago-main\\worlds', 'worlds')
     ],
-    hiddenimports=collect_submodules('worlds') + ['bsdiff4', 'bsdiff4.core', 'orjson', 'jinja2', 'requests'],
+    hiddenimports=collect_submodules('worlds') + ['bsdiff4', 'bsdiff4.core', 'orjson', 'jinja2', 'requests', 'schema'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
