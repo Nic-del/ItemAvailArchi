@@ -1,17 +1,18 @@
 import sys
+import os
 sys.path.insert(0, 'C:\\Users\\Linksweld\\Downloads\\Archipelago-main\\Archipelago-main')
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 a = Analysis(
     ['tracker\\tracker_cli.py'],
-    pathex=['C:\\Users\\Linksweld\\Downloads\\Archipelago-main\\Archipelago-main'],
+    pathex=['C:\\Users\\Linksweld\\Downloads\\Archipelago-main\\Archipelago-main', os.path.abspath('.')],
     binaries=[],
     datas=[
         ('tracker/tracker', 'tracker/tracker'),
         ('C:\\Users\\Linksweld\\Downloads\\Archipelago-main\\Archipelago-main\\data', 'data'),
         ('C:\\Users\\Linksweld\\Downloads\\Archipelago-main\\Archipelago-main\\worlds', 'worlds')
     ],
-    hiddenimports=collect_submodules('worlds') + ['bsdiff4', 'bsdiff4.core', 'orjson', 'jinja2', 'requests', 'schema'],
+    hiddenimports=collect_submodules('worlds') + collect_submodules('tracker') + ['bsdiff4', 'bsdiff4.core', 'orjson', 'jinja2', 'requests', 'schema'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
