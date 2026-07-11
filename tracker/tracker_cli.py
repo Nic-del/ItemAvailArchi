@@ -619,7 +619,7 @@ def initialize_dynamic_imports(game_name=None):
         async def server_auth(self, password_requested: bool = False):
             if not self.auth:
                 self.auth = self.username
-            await self.send_connect(game=self.game)
+            await super().server_auth(password_requested)
 
         def updateTracker(self):
             state = super().updateTracker()
