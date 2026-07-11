@@ -10,7 +10,7 @@ a = Analysis(
     pathex=['C:\\Users\\Linksweld\\Downloads\\Archipelago-main\\Archipelago-main', os.path.abspath('.')],
     binaries=[],
     datas=[
-        ('tracker/tracker', 'tracker/tracker'),
+        ('tracker/tracker', 'tracker'),
         ('C:\\Users\\Linksweld\\Downloads\\Archipelago-main\\Archipelago-main\\data', 'data'),
         ('C:\\Users\\Linksweld\\Downloads\\Archipelago-main\\Archipelago-main\\worlds', 'worlds')
     ],

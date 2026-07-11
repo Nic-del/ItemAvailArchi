@@ -53,7 +53,7 @@ a = Analysis(
     pathex=[ap_path, os.path.abspath('.')],
     binaries=[],
     datas=[
-        ('tracker/tracker', 'tracker/tracker'),
+        ('tracker/tracker', 'tracker'),
         (kivy_data_dir, 'data'),
         (os.path.join(ap_path, 'data'), 'data'),
         (os.path.join(ap_path, 'worlds'), 'worlds')
