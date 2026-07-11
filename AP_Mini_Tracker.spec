@@ -58,7 +58,7 @@ a = Analysis(
         (os.path.join(ap_path, 'data'), 'data'),
         (os.path.join(ap_path, 'worlds'), 'worlds')
     ] + collect_data_files('kivymd'),
-    hiddenimports=collect_submodules_no_import('kivymd') + collect_submodules('worlds') + collect_submodules('pathspec') + collect_submodules('websockets') + collect_submodules('tracker') + ['tracker_cli', 'bsdiff4', 'bsdiff4.core', 'orjson', 'jinja2', 'requests', 'schema'],
+    hiddenimports=collect_submodules_no_import('kivymd') + collect_submodules('worlds') + collect_submodules('pathspec') + collect_submodules('websockets') + ['tracker', 'tracker.TrackerClient', 'tracker.TrackerCore', 'tracker.TrackerKivy', 'tracker_cli', 'bsdiff4', 'bsdiff4.core', 'orjson', 'jinja2', 'requests', 'schema'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
