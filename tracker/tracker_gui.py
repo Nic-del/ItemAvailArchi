@@ -27,6 +27,17 @@ def get_settings_path():
         base_dir = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_dir, "tracker_settings.json")
 
+# Load and inject saved ap_dir if not specified on the command-line
+try:
+    _settings_file = get_settings_path()
+    if os.path.exists(_settings_file):
+        with open(_settings_file, "r", encoding="utf-8") as _f:
+            _saved_ap_dir = json.load(_f).get("ap_dir")
+            if _saved_ap_dir and "--ap-dir" not in sys.argv:
+                sys.argv.extend(["--ap-dir", _saved_ap_dir])
+except Exception:
+    pass
+
 class App:
     def __init__(self, root):
         self.root = root
@@ -392,10 +403,30 @@ class App:
         # Save last server and slot name
         try:
             settings_path = get_settings_path()
+            current_ap_dir = None
+            if "--ap-dir" in sys.argv:
+                try:
+                    current_ap_dir = sys.argv[sys.argv.index("--ap-dir") + 1]
+                except IndexError:
+                    pass
+
             settings = {
                 "server": self.server_entry.get().strip(),
                 "slot": self.slot_entry.get().strip()
             }
+            if current_ap_dir:
+                settings["ap_dir"] = current_ap_dir
+            else:
+                # Preserve existing ap_dir if not specified this run
+                try:
+                    if os.path.exists(settings_path):
+                        with open(settings_path, "r", encoding="utf-8") as f:
+                            old_settings = json.load(f)
+                            if "ap_dir" in old_settings:
+                                settings["ap_dir"] = old_settings["ap_dir"]
+                except Exception:
+                    pass
+
             with open(settings_path, "w", encoding="utf-8") as f:
                 json.dump(settings, f, indent=4)
         except Exception as e:
