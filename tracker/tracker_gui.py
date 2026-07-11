@@ -218,6 +218,12 @@ class App:
             script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tracker_cli.py")
             cmd = [python_exe, script_path, "--gui"]
 
+        if "--ap-dir" in sys.argv:
+            try:
+                cmd.extend(["--ap-dir", sys.argv[sys.argv.index("--ap-dir") + 1]])
+            except IndexError:
+                pass
+
         if server and slot:
             cmd.extend(["--server", server, "--slot", slot])
             if password:
