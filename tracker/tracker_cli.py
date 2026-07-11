@@ -438,6 +438,8 @@ class PatchedScandirIterator:
             return self.orig_iterator.__exit__(exc_type, exc_val, exc_tb)
 
 def patched_scandir(path="."):
+    if isinstance(path, int):
+        return orig_scandir(path)
     if not os.path.exists(path):
         try:
             os.makedirs(path, exist_ok=True)

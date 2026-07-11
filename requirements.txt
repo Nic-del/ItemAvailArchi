@@ -8,6 +8,6 @@ requests
 websocket-client
 pyyaml
 pathspec
-websockets
+websockets==11.0.3
 schema
 colorama
