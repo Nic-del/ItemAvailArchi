@@ -11,3 +11,4 @@ pathspec
 websockets==11.0.3
 schema
 colorama
+typing_extensions

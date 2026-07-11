@@ -14,7 +14,7 @@ a = Analysis(
         ('C:\\Users\\Linksweld\\Downloads\\Archipelago-main\\Archipelago-main\\data', 'data'),
         ('C:\\Users\\Linksweld\\Downloads\\Archipelago-main\\Archipelago-main\\worlds', 'worlds')
     ],
-    hiddenimports=collect_submodules('worlds') + ['tracker', 'tracker.TrackerClient', 'tracker.TrackerCore', 'tracker.TrackerKivy', 'bsdiff4', 'bsdiff4.core', 'orjson', 'jinja2', 'requests', 'schema', 'colorama'],
+    hiddenimports=collect_submodules('worlds') + ['tracker', 'tracker.TrackerClient', 'tracker.TrackerCore', 'tracker.TrackerKivy', 'bsdiff4', 'bsdiff4.core', 'orjson', 'jinja2', 'requests', 'schema', 'colorama', 'typing_extensions'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
