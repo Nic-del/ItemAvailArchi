@@ -38,7 +38,8 @@ UT_MAP_TAB_KEY = "UT_MAP"
 
 def get_ut_color(color: str)->str:
     import sys
-    if not gui_enabled or (sys.modules.get('kvui') and sys.modules['kvui'].__class__.__name__ == 'DynamicMockModule'):
+    import os
+    if not gui_enabled or (sys.modules.get('kvui') and sys.modules['kvui'].__class__.__name__ == 'DynamicMockModule') or os.environ.get("KIVY_WINDOW") == "dummy" or os.environ.get("KIVY_NO_WINDOW") == "1":
         colors = {
             "in_logic": "20ff20",
             "out_of_logic": "cf1010",

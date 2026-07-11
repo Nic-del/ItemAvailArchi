@@ -154,6 +154,14 @@ console_handler = logging.StreamHandler(sys.stdout if sys.stdout is not None els
 console_handler.setFormatter(logging.Formatter("[%(name)s] %(message)s"))
 root_logger.addHandler(console_handler)
 
+try:
+    log_path = os.path.join(get_workspace_path(), "tracker_debug.log")
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setFormatter(logging.Formatter("[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+    root_logger.addHandler(file_handler)
+except Exception:
+    pass
+
 # Completely restore warnings and standard streams to defaults to bypass Kivy overrides
 warnings.showwarning = original_showwarning
 if "--silent" not in sys.argv:
@@ -278,7 +286,7 @@ def scan_available_worlds():
     log_debug(f"Available worlds mapping: {game_to_world_file}")
     return game_to_world_file
 
-def find_matching_game(name, keys):
+def find_matching_game(name, keys, exact_only=False):
     if not name:
         return None
     name_lower = name.lower().replace("'", "").strip()
@@ -289,6 +297,8 @@ def find_matching_game(name, keys):
         k_lower = k.lower().replace("'", "").strip()
         if k_lower == name_lower:
             return k
+    if exact_only:
+        return None
     # Try matching without " beta" suffix
     name_no_beta = name_lower.replace(" beta", "").strip()
     for k in keys:
@@ -303,80 +313,88 @@ def ensure_world_loaded(game_name):
     if not game_name:
         return True
     
-    # We must first ensure worlds is imported
-    from worlds.AutoWorld import AutoWorldRegister
-    
-    matched_registered = find_matching_game(game_name, AutoWorldRegister.world_types.keys())
-    if matched_registered:
-        return True
-
-    mapping = scan_available_worlds()
-    matched_game = find_matching_game(game_name, mapping.keys())
-    if not matched_game:
-        return False
-
-    entry_name, is_zip = mapping[matched_game]
-    allowed_entries.add(entry_name)
-    allowed_entries.add(entry_name.lower())
-
-    log_debug(f"ensure_world_loaded called for '{game_name}' (matched: '{matched_game}', entry: '{entry_name}', zip: {is_zip})")
-
-    if not is_zip:
-        try:
-            log_debug(f"Attempting to import folder-world module 'worlds.{entry_name}'")
-            importlib.import_module(f"worlds.{entry_name}")
-            log_debug(f"Successfully imported 'worlds.{entry_name}'")
+    try:
+        # We must first ensure worlds is imported
+        from worlds.AutoWorld import AutoWorldRegister
+        
+        matched_registered = find_matching_game(game_name, AutoWorldRegister.world_types.keys(), exact_only=True)
+        log_debug(f"ensure_world_loaded: matched_registered = '{matched_registered}'")
+        if matched_registered:
             return True
-        except Exception as e:
-            tb = traceback.format_exc()
-            log_debug(f"Failed to dynamically import worlds.{entry_name}: {e}\n{tb}")
-            sys.stderr.write(f"Failed to dynamically import worlds.{entry_name}: {e}\n")
+
+        mapping = scan_available_worlds()
+        matched_game = find_matching_game(game_name, mapping.keys())
+        log_debug(f"ensure_world_loaded: matched_game in mapping = '{matched_game}'")
+        if not matched_game:
             return False
-    else:
-        try:
-            custom_worlds_dir = os.path.join(ap_dir, "custom_worlds")
-            apworld_path = os.path.join(custom_worlds_dir, entry_name)
-            if not os.path.exists(apworld_path):
-                localappdata = os.environ.get("LOCALAPPDATA")
-                if localappdata:
-                    user_custom_worlds = os.path.join(localappdata, "Archipelago", "custom_worlds")
-                    if os.path.exists(os.path.join(user_custom_worlds, entry_name)):
-                        apworld_path = os.path.join(user_custom_worlds, entry_name)
-            if not os.path.exists(apworld_path):
-                global_custom_worlds = r"C:\ProgramData\Archipelago\custom_worlds"
-                if os.path.exists(os.path.join(global_custom_worlds, entry_name)):
-                    apworld_path = os.path.join(global_custom_worlds, entry_name)
-            if not os.path.exists(apworld_path):
-                local_worlds_dir = None
-                if os.path.exists(ap_source_dir):
-                    local_worlds_dir = os.path.join(ap_source_dir, "worlds")
-                elif os.path.exists(os.path.join(ap_dir, "lib", "worlds")):
-                    local_worlds_dir = os.path.join(ap_dir, "lib", "worlds")
-                elif os.path.exists(os.path.join(ap_dir, "worlds")):
-                    local_worlds_dir = os.path.join(ap_dir, "worlds")
-                if local_worlds_dir:
-                    apworld_path = os.path.join(local_worlds_dir, entry_name)
-            
-            log_debug(f"Attempting to import zip-world '{entry_name}' from path '{apworld_path}'")
-            import zipimport
-            from pathlib import Path
-            importer = zipimport.zipimporter(apworld_path)
-            world_name = Path(entry_name).stem
-            
-            spec = importer.find_spec(f"worlds.{world_name}")
-            if spec:
-                module = importlib.util.module_from_spec(spec)
-                sys.modules[f"worlds.{world_name}"] = module
-                spec.loader.exec_module(module)
-                log_debug(f"Successfully imported worlds.{world_name} from zip")
+
+        entry_name, is_zip = mapping[matched_game]
+        allowed_entries.add(entry_name)
+        allowed_entries.add(entry_name.lower())
+
+        log_debug(f"ensure_world_loaded called for '{game_name}' (matched: '{matched_game}', entry: '{entry_name}', zip: {is_zip})")
+
+        if not is_zip:
+            try:
+                log_debug(f"Attempting to import folder-world module 'worlds.{entry_name}'")
+                importlib.import_module(f"worlds.{entry_name}")
+                log_debug(f"Successfully imported 'worlds.{entry_name}'")
                 return True
-            else:
-                log_debug(f"Spec not found for worlds.{world_name} inside the zip")
-        except Exception as e:
-            tb = traceback.format_exc()
-            log_debug(f"Failed to dynamically load apworld {entry_name}: {e}\n{tb}")
-            sys.stderr.write(f"Failed to dynamically load apworld {entry_name}: {e}\n")
-            return False
+            except Exception as e:
+                tb = traceback.format_exc()
+                log_debug(f"Failed to dynamically import worlds.{entry_name}: {e}\n{tb}")
+                sys.stderr.write(f"Failed to dynamically import worlds.{entry_name}: {e}\n")
+                return False
+        else:
+            try:
+                custom_worlds_dir = os.path.join(ap_dir, "custom_worlds")
+                apworld_path = os.path.join(custom_worlds_dir, entry_name)
+                if not os.path.exists(apworld_path):
+                    localappdata = os.environ.get("LOCALAPPDATA")
+                    if localappdata:
+                        user_custom_worlds = os.path.join(localappdata, "Archipelago", "custom_worlds")
+                        if os.path.exists(os.path.join(user_custom_worlds, entry_name)):
+                            apworld_path = os.path.join(user_custom_worlds, entry_name)
+                if not os.path.exists(apworld_path):
+                    global_custom_worlds = r"C:\ProgramData\Archipelago\custom_worlds"
+                    if os.path.exists(os.path.join(global_custom_worlds, entry_name)):
+                        apworld_path = os.path.join(global_custom_worlds, entry_name)
+                if not os.path.exists(apworld_path):
+                    local_worlds_dir = None
+                    if os.path.exists(ap_source_dir):
+                        local_worlds_dir = os.path.join(ap_source_dir, "worlds")
+                    elif os.path.exists(os.path.join(ap_dir, "lib", "worlds")):
+                        local_worlds_dir = os.path.join(ap_dir, "lib", "worlds")
+                    elif os.path.exists(os.path.join(ap_dir, "worlds")):
+                        local_worlds_dir = os.path.join(ap_dir, "worlds")
+                    if local_worlds_dir:
+                        apworld_path = os.path.join(local_worlds_dir, entry_name)
+                
+                log_debug(f"Attempting to import zip-world '{entry_name}' from path '{apworld_path}'")
+                import zipimport
+                from pathlib import Path
+                importer = zipimport.zipimporter(apworld_path)
+                world_name = Path(entry_name).stem
+                
+                spec = importer.find_spec(f"worlds.{world_name}")
+                if spec:
+                    module = importlib.util.module_from_spec(spec)
+                    sys.modules[f"worlds.{world_name}"] = module
+                    spec.loader.exec_module(module)
+                    log_debug(f"Successfully imported worlds.{world_name} from zip")
+                    return True
+                else:
+                    log_debug(f"Spec not found for worlds.{world_name} inside the zip")
+            except Exception as e:
+                tb = traceback.format_exc()
+                log_debug(f"Failed to dynamically load apworld {entry_name}: {e}\n{tb}")
+                sys.stderr.write(f"Failed to dynamically load apworld {entry_name}: {e}\n")
+                return False
+    except BaseException as be:
+        tb = traceback.format_exc()
+        log_debug(f"CRITICAL ERROR in ensure_world_loaded: {be}\n{tb}")
+        sys.stderr.write(f"CRITICAL ERROR in ensure_world_loaded: {be}\n")
+        return False
     return False
 
 # Patch os.scandir to selectively filter and hide tracker.apworld
@@ -520,20 +538,36 @@ def initialize_dynamic_imports(game_name=None):
             self.reconnecting = False
 
         async def disconnect(self, allow_autoreconnect: bool = False):
+            log_debug(f"DynamicCLITrackerContext: disconnect called. game: '{self.game}', auth: '{self.auth}'")
             if GUI_MODE:
                 if not getattr(self, "reconnecting", False):
                     print(json.dumps({"event": "disconnected"}), flush=True)
             elif not SILENT_MODE:
                 print("\n[Info] Disconnecting from server...", flush=True)
+            
+            saved_game = self.game
+            saved_auth = self.auth
             await super().disconnect(allow_autoreconnect)
+            if getattr(self, "reconnecting", False):
+                self.game = saved_game
+                self.auth = saved_auth
+            log_debug(f"DynamicCLITrackerContext: disconnect finished. game: '{self.game}', auth: '{self.auth}'")
 
         async def connection_closed(self):
+            log_debug(f"DynamicCLITrackerContext: connection_closed called. game: '{self.game}', auth: '{self.auth}'")
             if GUI_MODE:
                 if not getattr(self, "reconnecting", False):
                     print(json.dumps({"event": "disconnected"}), flush=True)
             elif not SILENT_MODE:
                 print("\n[Info] Connection closed.", file=sys.stderr, flush=True)
+            
+            saved_game = self.game
+            saved_auth = self.auth
             await super().connection_closed()
+            if getattr(self, "reconnecting", False):
+                self.game = saved_game
+                self.auth = saved_auth
+            log_debug(f"DynamicCLITrackerContext: connection_closed finished. game: '{self.game}', auth: '{self.auth}'")
 
         def on_print(self, args: dict):
             if not GUI_MODE and not SILENT_MODE:
@@ -546,16 +580,45 @@ def initialize_dynamic_imports(game_name=None):
         def handle_connection_loss(self, msg: str) -> None:
             if getattr(self, "reconnecting", False):
                 return
+            
+            import traceback
+            tb_str = traceback.format_exc()
+            
+            # Save traceback to a log file next to the application
+            try:
+                log_path = "ap_tracker_errors.log"
+                if getattr(sys, 'frozen', False):
+                    log_path = os.path.join(os.path.dirname(sys.executable), log_path)
+                else:
+                    log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), log_path)
+                
+                import datetime
+                with open(log_path, "a", encoding="utf-8") as f:
+                    f.write(f"\n=== Connection Loss: {datetime.datetime.now()} ===\n")
+                    f.write(f"Message: {msg}\n")
+                    f.write("Traceback:\n")
+                    f.write(tb_str)
+                    f.write("==================================================\n")
+            except Exception:
+                pass
+
             if GUI_MODE:
-                print(json.dumps({"event": "error", "message": msg}), flush=True)
+                exc_line = tb_str.strip().splitlines()[-1] if tb_str.strip() else "Unknown exception details"
+                detailed_msg = f"{msg}\n\nDetails:\n{exc_line}"
+                print(json.dumps({"event": "error", "message": detailed_msg}), flush=True)
             else:
                 if not SILENT_MODE:
-                    import traceback
                     print(f"\n[Connection Loss] {msg}", file=sys.stderr, flush=True)
-                    traceback.print_exc()
+                    print(tb_str, file=sys.stderr, flush=True)
             self.exit_event.set()
 
+        async def send_connect(self, **kwargs):
+            log_debug(f"DynamicCLITrackerContext: send_connect payload details - auth/slot: '{self.auth}', game: '{self.game}', password: '{self.password}', kwargs: {kwargs}")
+            await super().send_connect(**kwargs)
+
         async def server_auth(self, password_requested: bool = False):
+            if not self.auth:
+                self.auth = self.username
             await self.send_connect(game=self.game)
 
         def updateTracker(self):
@@ -1035,6 +1098,7 @@ async def main():
 
     async def reconnect_tracker(data):
         nonlocal temp_dir_obj, ctx
+        ctx.reconnecting = True
         r_server = data.get("server") or server
         r_slot = data.get("slot") or slot_name
         r_password = data.get("password") or password
@@ -1073,7 +1137,6 @@ async def main():
             ctx = CLITrackerContext(r_server, r_password, r_slot)
             ctx.game = r_game
 
-        ctx.reconnecting = True
         ctx.items_received = []
         ctx.locations_checked = set()
         ctx.checked_locations = set()
@@ -1195,8 +1258,11 @@ async def main():
         ctx.temp_dir_obj = temp_dir_obj
 
         # 3. Check game world is installed
+        log_debug(f"reconnect_tracker: checking if game world '{r_game}' is installed")
         matched_game_key = find_matching_game(r_game, AutoWorldRegister.world_types.keys())
+        log_debug(f"reconnect_tracker: matched_game_key = '{matched_game_key}'")
         connected_cls = AutoWorldRegister.world_types.get(matched_game_key) if matched_game_key else None
+        log_debug(f"reconnect_tracker: connected_cls = {connected_cls}")
         if connected_cls is None:
             from worlds import failed_world_loads
             error_msg = f"Game '{r_game}' is not installed in the active environment."
@@ -1211,6 +1277,7 @@ async def main():
                 error_msg += "\n\nLoading errors:\n" + "\n".join(matching_failures)
                 log_debug(f"Found matching failed loads during update: {matching_failures}")
 
+            log_debug(f"reconnect_tracker: Sending Game Not Installed error event: {error_msg}")
             if GUI_MODE:
                 print(json.dumps({"event": "error", "message": error_msg}), flush=True)
             elif not SILENT_MODE:
@@ -1219,12 +1286,14 @@ async def main():
             return
 
         # 4. Run generator
+        log_debug("reconnect_tracker: starting generator")
         if GUI_MODE:
             print(json.dumps({"event": "generating"}), flush=True)
         elif not SILENT_MODE:
             print("Running Archipelago logic generator...", flush=True)
         try:
             ctx.run_generator()
+            log_debug("reconnect_tracker: generator finished successfully")
             cli_multiworld_cache[r_slot] = (
                 ctx.tracker_core.multiworld,
                 ctx.tracker_core.launch_multiworld,
@@ -1232,6 +1301,8 @@ async def main():
                 ctx.temp_dir_obj
             )
         except Exception as e:
+            tb = traceback.format_exc()
+            log_debug(f"reconnect_tracker: Generator failed with exception: {e}\n{tb}")
             if GUI_MODE:
                 print(json.dumps({"event": "error", "message": f"Generator error: {e}"}), flush=True)
             elif not SILENT_MODE:
@@ -1240,6 +1311,7 @@ async def main():
             return
 
         # 5. Connect
+        log_debug(f"reconnect_tracker: starting connection to {r_server}")
         if not GUI_MODE and not SILENT_MODE:
             print(f"Connecting to {r_server}...", flush=True)
         ctx.reconnecting = False
@@ -1378,11 +1450,12 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
+        log_debug("KeyboardInterrupt caught in main")
         print("\nStopped.")
-    except Exception as e:
+    except BaseException as e:
         import traceback
         try:
-            log_debug(f"FATAL EXCEPTION in main: {e}\n{traceback.format_exc()}")
+            log_debug(f"FATAL EXCEPTION in main: {type(e).__name__} - {e}\n{traceback.format_exc()}")
         except Exception:
             pass
         raise e
