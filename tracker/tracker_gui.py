@@ -46,9 +46,9 @@ class App:
     def __init__(self, root):
         self.root = root
         self.root.title("AP Mini Tracker")
-        self.root.geometry("400x530")
+        self.root.geometry("420x530")
         self.root.configure(bg="#1e1e2e")
-        self.root.resizable(False, False)
+        self.root.resizable(True, False)
 
         # Style
         self.style = ttk.Style()
