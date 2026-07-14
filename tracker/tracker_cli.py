@@ -53,11 +53,18 @@ if "--silent" in sys.argv:
     sys.stderr = open(os.path.join(get_workspace_path(), "tracker_error.log"), 'w', buffering=1, encoding="utf-8")
     sys.stderr.write("=== Tracker CLI Started in Silent Mode ===\n")
 
+def clean_path(path_str):
+    if not path_str:
+        return path_str
+    for c in ['\u202a', '\u202b', '\u202c', '\u202d', '\u202e']:
+        path_str = path_str.replace(c, '')
+    return path_str.strip().strip('"').strip("'").strip()
+
 # Try custom paths (command-line argument or environment variable) first, then local portable directories, then default global location
 if "--ap-dir" in sys.argv:
-    ap_dir = sys.argv[sys.argv.index("--ap-dir") + 1]
+    ap_dir = clean_path(sys.argv[sys.argv.index("--ap-dir") + 1])
 elif os.environ.get("AP_DIR"):
-    ap_dir = os.environ.get("AP_DIR")
+    ap_dir = clean_path(os.environ.get("AP_DIR"))
 else:
     base_dir = os.path.dirname(tracker_dir)
     portable_ap_dir = os.path.join(base_dir, "Archipelago")
@@ -68,7 +75,9 @@ else:
     else:
         ap_dir = r"C:\ProgramData\Archipelago"
 
-ap_source_dir = os.environ.get("AP_SOURCE_DIR", "")
+ap_dir = clean_path(ap_dir)
+
+ap_source_dir = clean_path(os.environ.get("AP_SOURCE_DIR", ""))
 
 # Only append external libraries and source paths to sys.path when running in source mode.
 # When frozen, PyInstaller already contains all the dependencies compiled for the correct Python version.
@@ -663,13 +672,15 @@ def initialize_dynamic_imports(game_name=None):
                 accessible = len(state.in_logic_locations)
 
                 if GUI_MODE:
+                    import re
                     print(json.dumps({
                         "event": "stats",
                         "slot": self.selected_slot_name,
                         "game": self.game,
                         "checked": checked,
                         "total": total,
-                        "accessible": accessible
+                        "accessible": accessible,
+                        "checks_list": [re.sub(r"\[/?color.*?\]", "", loc) for loc in state.readable_locations]
                     }), flush=True)
                 elif not SILENT_MODE:
                     print(f"\n==================================================", flush=True)
@@ -728,9 +739,13 @@ def initialize_dynamic_imports(game_name=None):
 
 def get_game_from_yaml(players_dir, slot_name):
     # Find matching YAML file and extract game name
-    if not os.path.exists(players_dir):
+    try:
+        if not os.path.exists(players_dir):
+            return None
+        files = os.listdir(players_dir)
+    except Exception:
         return None
-    for file_name in os.listdir(players_dir):
+    for file_name in files:
         if file_name.endswith((".yaml", ".yml")):
             file_path = os.path.join(players_dir, file_name)
             try:
@@ -749,6 +764,24 @@ def get_game_from_yaml(players_dir, slot_name):
 
 
 async def main():
+    if "--help" in sys.argv or "-help" in sys.argv:
+        print("""Archipelago CLI Universal Tracker
+
+Usage:
+  AP_Mini_Tracker_CLI.exe [options] [server] [slot] [password]
+
+Options:
+  --server, --host, -h <address>  Archipelago server address (e.g. archipelago.gg:38281)
+  --slot, -s <name>               Your slot (player) name
+  --password, -p <pwd>            Server password (if required)
+  --game, -g <name>               Default game name (e.g. "Ocarina of Time")
+  --ap-dir <path>                 Custom path to Archipelago directory
+  --control-port <port>           Starting TCP port for duplicate instance detection (default: 38283)
+  --silent                        Disables verbose logs in the console
+  --help, -help                   Show this help message
+""")
+        return
+
     server = "localhost:38281"
     slot_name = "OOT"
     password = None
@@ -1326,15 +1359,21 @@ async def main():
         if line.startswith("{"):
             try:
                 data = json.loads(line)
+            except Exception as je:
+                if not SILENT_MODE:
+                    print(json.dumps({"event": "error", "message": f"JSON parse error: {je}"}), flush=True)
+                return
+            
+            try:
                 if data.get("action") == "connect":
                     await reconnect_tracker(data)
                 elif data.get("action") == "disconnect":
                     await disconnect_tracker()
                 elif data.get("action") == "exit":
                     ctx.exit_event.set()
-            except Exception as je:
+            except Exception as e:
                 if not SILENT_MODE:
-                    print(json.dumps({"event": "error", "message": f"JSON parse error: {je}"}), flush=True)
+                    print(json.dumps({"event": "error", "message": f"Connection/Action error: {e}"}), flush=True)
         elif line.startswith("/"):
             parts = line.split()
             cmd = parts[0].lower()

@@ -1322,6 +1322,9 @@ class TrackerGameContext(CommonContext):
 
     async def server_auth(self, password_requested: bool = False):
         if password_requested and not self.password:
+            import sys
+            if not sys.stdin or not sys.stdin.isatty():
+                raise RuntimeError("Password required by server, but none was provided.")
             await super(TrackerGameContext, self).server_auth(password_requested)
 
         await self.get_username()

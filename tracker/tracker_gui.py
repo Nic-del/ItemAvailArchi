@@ -33,8 +33,12 @@ try:
     if os.path.exists(_settings_file):
         with open(_settings_file, "r", encoding="utf-8") as _f:
             _saved_ap_dir = json.load(_f).get("ap_dir")
-            if _saved_ap_dir and "--ap-dir" not in sys.argv:
-                sys.argv.extend(["--ap-dir", _saved_ap_dir])
+            if _saved_ap_dir:
+                for c in ['\u202a', '\u202b', '\u202c', '\u202d', '\u202e']:
+                    _saved_ap_dir = _saved_ap_dir.replace(c, '')
+                _saved_ap_dir = _saved_ap_dir.strip().strip('"').strip("'").strip()
+                if _saved_ap_dir and "--ap-dir" not in sys.argv:
+                    sys.argv.extend(["--ap-dir", _saved_ap_dir])
 except Exception:
     pass
 
@@ -42,7 +46,7 @@ class App:
     def __init__(self, root):
         self.root = root
         self.root.title("AP Mini Tracker")
-        self.root.geometry("400x450")
+        self.root.geometry("400x530")
         self.root.configure(bg="#1e1e2e")
         self.root.resizable(False, False)
 
@@ -100,7 +104,7 @@ class App:
                 skip_next = False
                 continue
             if arg.startswith('-'):
-                if arg in ("--server", "-h", "--host", "--slot", "-s", "--password", "-p"):
+                if arg in ("--server", "-h", "--host", "--slot", "-s", "--password", "-p", "--ap-dir"):
                     skip_next = True
                 continue
             positional_args.append(arg)
@@ -120,6 +124,8 @@ class App:
         # Apply defaults if still unresolved
         saved_server = None
         saved_slot = None
+        saved_password = None
+        saved_ap_dir = None
         try:
             settings_path = get_settings_path()
             if os.path.exists(settings_path):
@@ -127,6 +133,8 @@ class App:
                     settings = json.load(f)
                     saved_server = settings.get("server")
                     saved_slot = settings.get("slot")
+                    saved_password = settings.get("password")
+                    saved_ap_dir = settings.get("ap_dir")
         except Exception:
             pass
 
@@ -134,6 +142,17 @@ class App:
             server_arg = saved_server or "localhost:38281"
         if not slot_arg:
             slot_arg = saved_slot or "LADXBeta"
+        if not self.password_arg:
+            self.password_arg = saved_password or ""
+
+        ap_dir_arg = None
+        try:
+            if "--ap-dir" in sys.argv:
+                ap_dir_arg = sys.argv[sys.argv.index("--ap-dir") + 1]
+        except (ValueError, IndexError):
+            pass
+        if not ap_dir_arg:
+            ap_dir_arg = saved_ap_dir or ""
 
         # State vars
         self.tracking_active = False
@@ -152,13 +171,55 @@ class App:
 
         # Connect Button
         self.connect_btn = ttk.Button(self.conn_frame, text="Connect", command=self.toggle_connection, width=10)
-        self.connect_btn.grid(row=0, column=2, rowspan=2, padx=5, sticky="ns")
+        self.connect_btn.grid(row=0, column=2, rowspan=3, padx=5, sticky="ns")
 
         # Slot Name
         tk.Label(self.conn_frame, text="Slot Name:", bg="#1e1e2e", fg="#cdd6f4").grid(row=1, column=0, sticky="w", pady=2)
         self.slot_entry = ttk.Entry(self.conn_frame, width=22)
         self.slot_entry.insert(0, slot_arg)
         self.slot_entry.grid(row=1, column=1, sticky="w", padx=5, pady=2)
+
+        # Password
+        tk.Label(self.conn_frame, text="Password:", bg="#1e1e2e", fg="#cdd6f4").grid(row=2, column=0, sticky="w", pady=2)
+        self.password_frame = tk.Frame(self.conn_frame, bg="#1e1e2e")
+        self.password_frame.grid(row=2, column=1, sticky="w", padx=5, pady=2)
+        
+        self.password_entry = ttk.Entry(self.password_frame, width=22, show="*")
+        self.password_entry.insert(0, self.password_arg)
+        self.password_entry.pack(side=tk.LEFT)
+        
+        self.show_pwd_var = tk.BooleanVar(value=False)
+        self.show_pwd_cb = tk.Checkbutton(
+            self.password_frame, 
+            text="👁", 
+            variable=self.show_pwd_var, 
+            command=self.toggle_password_visibility,
+            bg="#1e1e2e", 
+            fg="#cdd6f4",
+            selectcolor="#313244",
+            activebackground="#1e1e2e",
+            activeforeground="#cdd6f4",
+            bd=0, 
+            highlightthickness=0
+        )
+        self.show_pwd_cb.pack(side=tk.LEFT, padx=(5, 0))
+
+        # Archipelago Path
+        tk.Label(self.conn_frame, text="AP Path:", bg="#1e1e2e", fg="#cdd6f4").grid(row=3, column=0, sticky="w", pady=2)
+        self.ap_path_frame = tk.Frame(self.conn_frame, bg="#1e1e2e")
+        self.ap_path_frame.grid(row=3, column=1, columnspan=2, sticky="we", padx=5, pady=2)
+        
+        self.ap_path_entry = ttk.Entry(self.ap_path_frame, width=22)
+        self.ap_path_entry.insert(0, ap_dir_arg)
+        self.ap_path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        self.ap_path_btn = ttk.Button(self.ap_path_frame, text="...", width=3, command=self.browse_ap_dir)
+        self.ap_path_btn.pack(side=tk.LEFT, padx=(5, 0))
+
+        # State vars addition
+        self.checks_list = []
+        self.checks_window = None
+        self.checks_listbox = None
 
         # Stats Area
         self.stats_frame = tk.LabelFrame(root, text=" Tracking Stats ", bg="#1e1e2e", fg="#89b4fa", font=("Segoe UI", 10, "bold"), bd=1, relief=tk.SOLID)
@@ -172,7 +233,10 @@ class App:
         self.lbl_checks.pack(pady=5)
 
         self.lbl_accessible = tk.Label(self.stats_frame, text="Accessible (In Logic): --", font=("Segoe UI", 14, "bold"), bg="#1e1e2e", fg="#a6e3a1")
-        self.lbl_accessible.pack(pady=10)
+        self.lbl_accessible.pack(pady=5)
+
+        self.show_checks_btn = ttk.Button(self.stats_frame, text="Show Checks", command=self.show_checks_window, state="disabled")
+        self.show_checks_btn.pack(pady=(5, 10))
 
         # Slots Buttons Frame
         self.btn_frame_label = tk.Label(root, text="Switch Slot:", bg="#1e1e2e", fg="#89b4fa", font=("Segoe UI", 9, "bold"))
@@ -236,7 +300,10 @@ class App:
             script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tracker_cli.py")
             cmd = [python_exe, script_path, "--gui"]
 
-        if "--ap-dir" in sys.argv:
+        ap_dir_val = self.ap_path_entry.get().strip() if hasattr(self, 'ap_path_entry') else None
+        if ap_dir_val:
+            cmd.extend(["--ap-dir", ap_dir_val])
+        elif "--ap-dir" in sys.argv:
             try:
                 cmd.extend(["--ap-dir", sys.argv[sys.argv.index("--ap-dir") + 1]])
             except IndexError:
@@ -326,7 +393,7 @@ class App:
             "action": "connect",
             "server": server,
             "slot": slot,
-            "password": self.password_arg,
+            "password": self.password_entry.get().strip() or None,
             "game": self.slots.get(slot)
         }
         try:
@@ -340,6 +407,14 @@ class App:
 
     def stop_tracking(self, silent=False):
         self.tracking_active = False
+        if hasattr(self, 'show_checks_btn'):
+            self.show_checks_btn.configure(state="disabled")
+        self.checks_list = []
+        if self.checks_window and self.checks_window.winfo_exists():
+            self.checks_window.destroy()
+        self.checks_window = None
+        self.checks_listbox = None
+
         if self.proc and self.proc.poll() is None:
             try:
                 self.proc.stdin.write(json.dumps({"action": "disconnect"}) + "\n")
@@ -355,6 +430,80 @@ class App:
             # Clear buttons
             for child in self.scroll_frame.winfo_children():
                 child.destroy()
+
+    def toggle_password_visibility(self):
+        if self.show_pwd_var.get():
+            self.password_entry.configure(show="")
+        else:
+            self.password_entry.configure(show="*")
+
+    def show_checks_window(self):
+        if self.checks_window and self.checks_window.winfo_exists():
+            self.checks_window.lift()
+            self.checks_window.focus_force()
+            return
+            
+        self.checks_window = tk.Toplevel(self.root)
+        self.checks_window.title(f"Checks to do ({len(self.checks_list)})")
+        self.checks_window.geometry("450x500")
+        self.checks_window.configure(bg="#1e1e2e")
+        self.checks_window.transient(self.root)
+        
+        # Search Frame
+        search_frame = tk.Frame(self.checks_window, bg="#1e1e2e")
+        search_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+        
+        tk.Label(search_frame, text="Search:", bg="#1e1e2e", fg="#cdd6f4").pack(side=tk.LEFT, padx=(0, 5))
+        self.search_var = tk.StringVar()
+        self.search_var.trace_add("write", lambda *args: self.populate_checks_listbox())
+        
+        self.search_entry = ttk.Entry(search_frame, textvariable=self.search_var)
+        self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.search_entry.focus()
+        
+        frame = tk.Frame(self.checks_window, bg="#1e1e2e")
+        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(5, 10))
+        
+        scrollbar = tk.Scrollbar(frame, orient="vertical")
+        
+        self.checks_listbox = tk.Listbox(
+            frame, 
+            bg="#313244", 
+            fg="#cdd6f4", 
+            selectbackground="#45475a", 
+            selectforeground="#cdd6f4",
+            highlightthickness=0, 
+            bd=0, 
+            font=("Segoe UI", 10),
+            yscrollcommand=scrollbar.set
+        )
+        
+        scrollbar.config(command=self.checks_listbox.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.checks_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        self.populate_checks_listbox()
+
+    def populate_checks_listbox(self):
+        if not self.checks_window or not self.checks_window.winfo_exists() or not self.checks_listbox:
+            return
+        query = self.search_var.get().lower().strip() if hasattr(self, 'search_var') else ""
+        
+        filtered_list = []
+        for item in self.checks_list:
+            if not query or query in item.lower():
+                filtered_list.append(item)
+                
+        self.checks_window.title(f"Checks to do ({len(filtered_list)} / {len(self.checks_list)})")
+        self.checks_listbox.delete(0, tk.END)
+        if filtered_list:
+            for item in sorted(filtered_list):
+                self.checks_listbox.insert(tk.END, f"  •  {item}")
+        else:
+            if query:
+                self.checks_listbox.insert(tk.END, "  No matching checks found.")
+            else:
+                self.checks_listbox.insert(tk.END, "  No accessible checks remaining.")
 
     def poll_queue(self):
         while not gui_queue.empty():
@@ -395,6 +544,10 @@ class App:
                 self.lbl_slot_game.configure(text=f"Slot: {data['slot']} | Game: {data['game']}")
                 self.lbl_checks.configure(text=f"Checks: {data['checked']} / {data['total']} checked")
                 self.lbl_accessible.configure(text=f"Accessible (In Logic): {data['accessible']}")
+                self.checks_list = data.get("checks_list", [])
+                if hasattr(self, 'show_checks_btn'):
+                    self.show_checks_btn.configure(state="normal")
+                self.populate_checks_listbox()
             elif evt == "DISCONNECTED":
                 print("[Tracker GUI] Disconnected.", flush=True)
                 if self.tracking_active:
@@ -406,34 +559,25 @@ class App:
         
         self.root.after(100, self.poll_queue)
 
+    def browse_ap_dir(self):
+        from tkinter import filedialog
+        selected = filedialog.askdirectory(title="Select Archipelago Directory")
+        if selected:
+            for c in ['\u202a', '\u202b', '\u202c', '\u202d', '\u202e']:
+                selected = selected.replace(c, '')
+            selected = selected.strip().strip('"').strip("'").strip()
+            self.ap_path_entry.delete(0, tk.END)
+            self.ap_path_entry.insert(0, selected)
+
     def on_close(self):
-        # Save last server and slot name
         try:
             settings_path = get_settings_path()
-            current_ap_dir = None
-            if "--ap-dir" in sys.argv:
-                try:
-                    current_ap_dir = sys.argv[sys.argv.index("--ap-dir") + 1]
-                except IndexError:
-                    pass
-
             settings = {
                 "server": self.server_entry.get().strip(),
-                "slot": self.slot_entry.get().strip()
+                "slot": self.slot_entry.get().strip(),
+                "password": self.password_entry.get().strip(),
+                "ap_dir": self.ap_path_entry.get().strip()
             }
-            if current_ap_dir:
-                settings["ap_dir"] = current_ap_dir
-            else:
-                # Preserve existing ap_dir if not specified this run
-                try:
-                    if os.path.exists(settings_path):
-                        with open(settings_path, "r", encoding="utf-8") as f:
-                            old_settings = json.load(f)
-                            if "ap_dir" in old_settings:
-                                settings["ap_dir"] = old_settings["ap_dir"]
-                except Exception:
-                    pass
-
             with open(settings_path, "w", encoding="utf-8") as f:
                 json.dump(settings, f, indent=4)
         except Exception as e:
